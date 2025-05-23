@@ -3,7 +3,7 @@ CI Code Companion Web Dashboard
 Visualizes AI-powered code analysis results
 """
 
-from flask import Flask, render_template, jsonify, session
+from flask import Flask, render_template, jsonify, session, redirect, url_for, request
 from flask_cors import CORS
 import json
 import os
@@ -217,6 +217,80 @@ def gitlab_status():
             'connected': False,
             'message': str(e)
         })
+
+@app.route('/repository')
+def repository_browser():
+    """Repository browser interface."""
+    if 'gitlab_token' not in session:
+        return redirect(url_for('dashboard'))
+    
+    return render_template('repository_browser.html')
+
+@app.route('/api/ai-analyze', methods=['POST'])
+def ai_analyze():
+    """AI analysis endpoint for repository browser."""
+    if 'gitlab_token' not in session:
+        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    
+    try:
+        data = request.json
+        action = data.get('action')
+        file_path = data.get('file_path')
+        content = data.get('content')
+        project_id = data.get('project_id')
+        branch = data.get('branch')
+        
+        if not all([action, file_path, content]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        # Import AI components
+        from src.ci_code_companion.vertex_ai_client import VertexAIClient
+        from src.ci_code_companion.code_reviewer import CodeReviewer
+        from src.ci_code_companion.test_generator import TestGenerator
+        
+        # Initialize AI components
+        ai_client = VertexAIClient()
+        
+        result = {}
+        
+        if action == 'review':
+            reviewer = CodeReviewer(ai_client)
+            review_result = reviewer.review_code(content, file_path)
+            result = {
+                'action': 'review',
+                'file_path': file_path,
+                'analysis': review_result,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        elif action == 'test-generation':
+            test_generator = TestGenerator(ai_client)
+            test_result = test_generator.generate_tests(content, file_path)
+            result = {
+                'action': 'test-generation',
+                'file_path': file_path,
+                'tests': test_result,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        elif action == 'improve':
+            reviewer = CodeReviewer(ai_client)
+            # Get code improvement suggestions
+            improvement_result = reviewer.suggest_improvements(content, file_path)
+            result = {
+                'action': 'improve',
+                'file_path': file_path,
+                'improvements': improvement_result,
+                'timestamp': datetime.now().isoformat()
+            }
+        else:
+            return jsonify({'error': 'Invalid action'}), 400
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"AI analysis error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001) 
