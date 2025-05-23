@@ -196,4 +196,183 @@ def analyze_commit(project_id: int, commit_id: str, branch: str):
 def analyze_merge_request(project_id: int, mr_id: int, source_branch: str):
     """Analyze a merge request."""
     # Similar to analyze_commit, but for merge requests
-    pass 
+    pass
+
+@gitlab_bp.route('/gitlab/repository/<int:project_id>/tree')
+def get_repository_tree(project_id):
+    """Get repository file tree structure."""
+    if 'gitlab_token' not in session:
+        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    
+    try:
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        gl.auth()
+        
+        project = gl.projects.get(project_id)
+        branch = request.args.get('branch', project.default_branch)
+        path = request.args.get('path', '')
+        
+        # Get repository tree
+        items = project.repository_tree(ref=branch, path=path, get_all=True)
+        
+        tree_data = []
+        for item in items:
+            tree_data.append({
+                'id': item['id'],
+                'name': item['name'],
+                'type': item['type'],  # 'tree' for directory, 'blob' for file
+                'path': item['path'],
+                'mode': item['mode']
+            })
+        
+        return jsonify({
+            'project_id': project_id,
+            'branch': branch,
+            'path': path,
+            'items': tree_data
+        })
+        
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab API authentication failed: {str(e)}")
+        session.pop('gitlab_token', None)
+        return jsonify({'error': 'GitLab authentication failed'}), 401
+    except Exception as e:
+        logger.error(f"Error getting repository tree: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@gitlab_bp.route('/gitlab/repository/<int:project_id>/file')
+def get_file_content(project_id):
+    """Get file content from repository."""
+    if 'gitlab_token' not in session:
+        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    
+    try:
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        gl.auth()
+        
+        project = gl.projects.get(project_id)
+        file_path = request.args.get('path')
+        branch = request.args.get('branch', project.default_branch)
+        
+        if not file_path:
+            return jsonify({'error': 'File path is required'}), 400
+        
+        # Get file content
+        file_info = project.files.get(file_path=file_path, ref=branch)
+        
+        return jsonify({
+            'project_id': project_id,
+            'file_path': file_path,
+            'branch': branch,
+            'content': file_info.decode().decode('utf-8'),
+            'file_name': file_info.file_name,
+            'size': file_info.size,
+            'encoding': file_info.encoding,
+            'content_sha256': file_info.content_sha256,
+            'ref': file_info.ref,
+            'blob_id': file_info.blob_id,
+            'commit_id': file_info.commit_id,
+            'last_commit_id': file_info.last_commit_id
+        })
+        
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab API authentication failed: {str(e)}")
+        session.pop('gitlab_token', None)
+        return jsonify({'error': 'GitLab authentication failed'}), 401
+    except Exception as e:
+        logger.error(f"Error getting file content: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@gitlab_bp.route('/gitlab/repository/<int:project_id>/commits')
+def get_commits(project_id):
+    """Get recent commits for a repository."""
+    if 'gitlab_token' not in session:
+        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    
+    try:
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        gl.auth()
+        
+        project = gl.projects.get(project_id)
+        branch = request.args.get('branch', project.default_branch)
+        per_page = min(int(request.args.get('per_page', 20)), 50)  # Limit to 50
+        
+        # Get recent commits
+        commits = project.commits.list(ref_name=branch, per_page=per_page)
+        
+        commit_data = []
+        for commit in commits:
+            commit_data.append({
+                'id': commit.id,
+                'short_id': commit.short_id,
+                'title': commit.title,
+                'message': commit.message,
+                'author_name': commit.author_name,
+                'author_email': commit.author_email,
+                'authored_date': commit.authored_date,
+                'committer_name': commit.committer_name,
+                'committer_email': commit.committer_email,
+                'committed_date': commit.committed_date,
+                'web_url': commit.web_url
+            })
+        
+        return jsonify({
+            'project_id': project_id,
+            'branch': branch,
+            'commits': commit_data
+        })
+        
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab API authentication failed: {str(e)}")
+        session.pop('gitlab_token', None)
+        return jsonify({'error': 'GitLab authentication failed'}), 401
+    except Exception as e:
+        logger.error(f"Error getting commits: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@gitlab_bp.route('/gitlab/repository/<int:project_id>/branches')
+def get_branches(project_id):
+    """Get repository branches."""
+    if 'gitlab_token' not in session:
+        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    
+    try:
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        gl.auth()
+        
+        project = gl.projects.get(project_id)
+        
+        # Get branches
+        branches = project.branches.list(get_all=True)
+        
+        branch_data = []
+        for branch in branches:
+            branch_data.append({
+                'name': branch.name,
+                'commit': {
+                    'id': branch.commit['id'],
+                    'short_id': branch.commit['short_id'],
+                    'title': branch.commit['title'],
+                    'author_name': branch.commit['author_name'],
+                    'authored_date': branch.commit['authored_date']
+                },
+                'merged': branch.merged,
+                'protected': branch.protected,
+                'default': branch.name == project.default_branch,
+                'can_push': branch.can_push,
+                'web_url': branch.web_url
+            })
+        
+        return jsonify({
+            'project_id': project_id,
+            'default_branch': project.default_branch,
+            'branches': branch_data
+        })
+        
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab API authentication failed: {str(e)}")
+        session.pop('gitlab_token', None)
+        return jsonify({'error': 'GitLab authentication failed'}), 401
+    except Exception as e:
+        logger.error(f"Error getting branches: {str(e)}")
+        return jsonify({'error': str(e)}), 500 
