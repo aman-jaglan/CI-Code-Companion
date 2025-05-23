@@ -1,12 +1,22 @@
 stages:
-  - validate
-  - test
-  - build
-  - deploy
+  - ai-health-check
+  - ai-code-analysis
+  - ai-test-generation
+  - quality-gate
+  - deploy-dashboard
 
 variables:
   DOCKER_IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.9"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+  GITLAB_URL: ${CI_SERVER_URL}
+  PROJECT_URL: ${CI_PROJECT_URL}
+
+cache:
+  paths:
+    - .cache/pip/
+    - venv/
 
 # Template for Python jobs
 .python_base:
@@ -14,6 +24,163 @@ variables:
   before_script:
     - pip install --upgrade pip
     - pip install -r requirements.txt
+
+# Health check to ensure AI services are working
+ai-health-check:
+  stage: ai-health-check
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+  script:
+    - echo "🔍 Checking AI service connectivity..."
+    - python -c "
+      from src.vertex_ai_client import VertexAIClient;
+      client = VertexAIClient();
+      result = client.health_check();
+      print('✅ AI Health Check:', result);
+      assert 'success' in result.lower(), 'AI service not healthy'
+      "
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# AI Code Analysis - Main stage
+ai-code-analysis:
+  stage: ai-code-analysis
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    # Setup git for changed files detection
+    - git fetch origin $CI_DEFAULT_BRANCH
+  script:
+    - echo "🤖 Running AI Code Analysis..."
+    - python scripts/gitlab_ci_integration.py
+  artifacts:
+    when: always
+    paths:
+      - ai-reports/
+    reports:
+      junit: ai-reports/analysis-results.xml  # If you generate XML reports
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.py"
+  allow_failure: false
+
+# AI Test Generation - Runs in parallel
+ai-test-generation:
+  stage: ai-test-generation
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - git fetch origin $CI_DEFAULT_BRANCH
+  script:
+    - echo "🧪 Generating AI-powered tests..."
+    - python scripts/ai_test_runner.py
+  artifacts:
+    when: always
+    paths:
+      - generated-tests/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.py"
+  allow_failure: true  # Test generation shouldn't block deployment
+
+# Quality Gate - Checks if code meets standards
+quality-gate:
+  stage: quality-gate
+  image: python:${PYTHON_VERSION}
+  dependencies:
+    - ai-code-analysis
+  script:
+    - echo "🚦 Evaluating code quality gate..."
+    - python scripts/quality_gate_checker.py ai-reports/analysis-results.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.py"
+  allow_failure: false
+
+# Deploy Dashboard (only on main branch)
+deploy-dashboard:
+  stage: deploy-dashboard
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install flask gunicorn
+  script:
+    - echo "🚀 Deploying AI Code Companion Dashboard..."
+    - cd web_dashboard
+    - gunicorn --bind 0.0.0.0:5000 app:app &
+    - echo "Dashboard deployed at ${CI_ENVIRONMENT_URL}"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment:
+    name: production
+    url: ${CI_ENVIRONMENT_URL}
+
+# Notification job - Sends Slack/Teams notifications
+ai-analysis-notification:
+  stage: .post
+  image: alpine:latest
+  dependencies:
+    - ai-code-analysis
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "📢 Sending AI analysis notifications..."
+    - |
+      if [ -f "ai-reports/analysis-results.json" ]; then
+        QUALITY_SCORE=$(cat ai-reports/analysis-results.json | jq -r '.overall_scores.code_quality')
+        SECURITY_SCORE=$(cat ai-reports/analysis-results.json | jq -r '.overall_scores.security')
+        
+        MESSAGE="🤖 AI Code Analysis Complete\\n"
+        MESSAGE="${MESSAGE}📊 Quality: ${QUALITY_SCORE}/10\\n"
+        MESSAGE="${MESSAGE}🔒 Security: ${SECURITY_SCORE}/10\\n"
+        MESSAGE="${MESSAGE}🔗 View: ${CI_PIPELINE_URL}"
+        
+        # Send to Slack (if webhook configured)
+        if [ ! -z "$SLACK_WEBHOOK_URL" ]; then
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"${MESSAGE}\"}" \
+            $SLACK_WEBHOOK_URL
+        fi
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.py"
+  allow_failure: true
+
+# Code Review Bot - Posts detailed comments
+code-review-bot:
+  stage: .post
+  image: python:${PYTHON_VERSION}
+  dependencies:
+    - ai-code-analysis
+  before_script:
+    - pip install requests
+  script:
+    - echo "🗨️ Posting AI code review comments..."
+    - python scripts/gitlab_mr_commenter.py
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "**/*.py"
+  allow_failure: true
 
 # Validate code quality
 lint:
@@ -87,4 +254,4 @@ deploy_to_catalog:
     - when: manual
   environment:
     name: catalog
-    url: https://gitlab.com/your-group/ci-code-companion 
+    url: ${CI_PROJECT_URL} 

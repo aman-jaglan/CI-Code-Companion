@@ -7,17 +7,21 @@ for code generation and analysis tasks.
 
 import os
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
+
 from google.cloud import aiplatform
-from google.cloud.aiplatform.gapic.schema import predict
-from vertexai.language_models import CodeGenerationModel, CodeChatModel
+from google.cloud.aiplatform_v1.services import prediction_service
+# from google.cloud.aiplatform_v1.types import predict # Removed direct import of predict
+from google.protobuf import json_format
+from google.protobuf.struct_pb2 import Value
+import vertexai
+from vertexai.generative_models import GenerativeModel
 
 logger = logging.getLogger(__name__)
 
-
 class VertexAIClient:
-    """Client for interacting with Google Cloud Vertex AI Codey models."""
-    
+    """Client for interacting with Google Cloud Vertex AI services."""
+
     def __init__(
         self,
         project_id: str,
@@ -26,82 +30,100 @@ class VertexAIClient:
     ):
         """
         Initialize the Vertex AI client.
-        
+
         Args:
             project_id: Google Cloud project ID
             location: Google Cloud region
-            credentials_path: Path to service account JSON file (optional)
+            credentials_path: Path to service account credentials JSON file
         """
-        self.project_id = project_id
-        self.location = location
-        
-        # Set up authentication
         if credentials_path:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-        
-        # Initialize Vertex AI
+
+        self.project_id = project_id
+        self.location = location
+        self.api_endpoint = f"{location}-aiplatform.googleapis.com"
+        self.client_options = {"api_endpoint": self.api_endpoint}
+
+        # Initialize Vertex AI (this sets up the project and location for the library)
         aiplatform.init(project=project_id, location=location)
+        vertexai.init(project=project_id, location=location)
+
+        # Prediction service client for PaLM models
+        self.prediction_client = prediction_service.PredictionServiceClient(
+            client_options=self.client_options
+        )
+
+        # Define model endpoints for PaLM models
+        self.code_generation_model_endpoint = (
+            f"projects/{project_id}/locations/{location}/publishers/google/models/code-bison@001"
+        )
+        self.text_generation_model_endpoint = (
+            f"projects/{project_id}/locations/{location}/publishers/google/models/text-bison"
+        )
         
-        # Initialize models
-        self.code_generation_model = CodeGenerationModel.from_pretrained("code-bison@001")
-        self.code_chat_model = CodeChatModel.from_pretrained("codechat-bison@001")
+        # Gemini model
+        self.gemini_model_id = "gemini-2.5-flash-preview-05-20"
         
-        logger.info(f"Initialized Vertex AI client for project {project_id}")
-    
+        logger.info(f"VertexAIClient initialized for project {project_id} in {location}")
+
     def generate_code(
         self,
-        prompt: str,
+        prompt_text: str,
         max_output_tokens: int = 1024,
-        temperature: float = 0.2,
-        candidate_count: int = 1
+        temperature: float = 0.2
     ) -> str:
         """
-        Generate code using the Codey code generation model.
-        
+        Generate code using the Gemini model.
+
         Args:
-            prompt: The prompt for code generation
-            max_output_tokens: Maximum number of tokens to generate
-            temperature: Sampling temperature (0.0-1.0)
-            candidate_count: Number of response candidates to generate
-            
+            prompt_text: The prompt for code generation.
+            max_output_tokens: Maximum number of tokens to generate.
+            temperature: Sampling temperature (0.0-1.0).
+
         Returns:
-            Generated code as a string
+            Generated code as a string.
         """
         try:
-            response = self.code_generation_model.predict(
-                prompt=prompt,
-                max_output_tokens=max_output_tokens,
-                temperature=temperature,
-                candidate_count=candidate_count
-            )
+            model = GenerativeModel(self.gemini_model_id)
             
-            generated_code = response.text
-            logger.info(f"Successfully generated code ({len(generated_code)} characters)")
-            return generated_code
+            # Create a code generation prompt
+            code_prompt = f"""Generate Python code for the following request:
+
+{prompt_text}
+
+Please provide clean, well-documented code with type hints."""
+
+            response = model.generate_content(code_prompt)
             
+            if response.candidates and response.candidates[0].content.parts:
+                generated_code = response.candidates[0].content.parts[0].text
+                logger.info(f"Successfully generated code ({len(generated_code)} characters)")
+                return generated_code
+            else:
+                logger.warning("Code generation returned no content.")
+                return ""
         except Exception as e:
             logger.error(f"Error generating code: {str(e)}")
             raise
-    
+
     def analyze_code(
         self,
         code: str,
-        analysis_type: str = "review",
-        context: Optional[str] = None
+        analysis_type: str = "review"
     ) -> str:
         """
-        Analyze code using the Codey chat model.
-        
+        Analyze code using the Gemini model.
+
         Args:
-            code: The code to analyze
-            analysis_type: Type of analysis ('review', 'security', 'performance')
-            context: Additional context for the analysis
-            
+            code: The code to analyze.
+            analysis_type: Type of analysis ('review', 'security', 'performance').
+
         Returns:
-            Analysis results as a string
+            Analysis results as a string.
         """
         try:
-            # Create analysis prompt based on type
+            model = GenerativeModel(self.gemini_model_id)
+            
             if analysis_type == "review":
                 prompt = f"""Please review the following code and provide feedback on:
 1. Code quality and best practices
@@ -110,19 +132,16 @@ class VertexAIClient:
 4. Security considerations
 
 Code to review:
-```
+```python
 {code}
 ```
 
-{f"Additional context: {context}" if context else ""}
-
 Please provide a structured review with clear recommendations."""
-
             elif analysis_type == "security":
                 prompt = f"""Please analyze the following code for security vulnerabilities:
 
 Code to analyze:
-```
+```python
 {code}
 ```
 
@@ -132,12 +151,11 @@ Focus on:
 - Data exposure risks
 - Injection vulnerabilities
 - Other security concerns"""
-
             elif analysis_type == "performance":
                 prompt = f"""Please analyze the following code for performance issues:
 
 Code to analyze:
-```
+```python
 {code}
 ```
 
@@ -146,87 +164,68 @@ Focus on:
 - Memory usage
 - Inefficient operations
 - Optimization opportunities"""
-            
             else:
-                prompt = f"Please analyze this code: ```{code}```"
+                prompt = f"Please analyze this code: ```python\n{code}\n```"
+
+            response = model.generate_content(prompt)
             
-            chat_session = self.code_chat_model.start_chat()
-            response = chat_session.send_message(prompt)
-            
-            logger.info(f"Successfully analyzed code ({analysis_type})")
-            return response.text
-            
+            if response.candidates and response.candidates[0].content.parts:
+                analysis_result = response.candidates[0].content.parts[0].text
+                logger.info(f"Successfully analyzed code ({analysis_type})")
+                return analysis_result
+            else:
+                logger.warning(f"Code analysis ({analysis_type}) returned no content.")
+                return ""
         except Exception as e:
-            logger.error(f"Error analyzing code: {str(e)}")
+            logger.error(f"Error analyzing code ({analysis_type}): {str(e)}")
             raise
-    
-    def generate_unit_tests(
-        self,
-        function_code: str,
-        language: str = "python",
-        test_framework: str = "pytest",
-        include_edge_cases: bool = True
-    ) -> str:
-        """
-        Generate unit tests for a given function.
-        
-        Args:
-            function_code: The function code to test
-            language: Programming language
-            test_framework: Testing framework to use
-            include_edge_cases: Whether to include edge case tests
-            
-        Returns:
-            Generated test code
-        """
-        edge_case_instruction = "Include edge cases and error conditions." if include_edge_cases else ""
-        
-        prompt = f"""Generate comprehensive unit tests for the following {language} function using {test_framework}.
 
-Function to test:
-```{language}
-{function_code}
-```
-
-Requirements:
-1. Test normal/typical use cases
-2. {edge_case_instruction}
-3. Test error handling and invalid inputs
-4. Use proper assertions and test structure
-5. Include docstrings for test methods
-6. Follow {test_framework} best practices
-
-Generate complete, runnable test code:"""
-
-        return self.generate_code(prompt, max_output_tokens=2048)
-    
     def health_check(self) -> Dict[str, Any]:
         """
-        Perform a health check of the Vertex AI connection.
-        
+        Check if the connection to Vertex AI is working.
+
         Returns:
-            Dictionary with health check results
+            Dict containing status information.
         """
         try:
-            # Simple test with the code generation model
-            test_prompt = "# Generate a simple Python hello world function"
-            response = self.generate_code(test_prompt, max_output_tokens=100)
+            # Test connection by making a simple request to Gemini
+            model = GenerativeModel(self.gemini_model_id)
+            response = model.generate_content("Hello")
             
-            return {
-                "status": "healthy",
-                "project_id": self.project_id,
-                "location": self.location,
-                "test_response_length": len(response),
-                "models_available": {
-                    "code_generation": True,
-                    "code_chat": True
+            if response.candidates and response.candidates[0].content.parts:
+                return {
+                    "status": "healthy",
+                    "message": "Successfully connected to Vertex AI and Gemini model is accessible.",
+                    "project_id": self.project_id,
+                    "location": self.location,
+                    "models_available": {
+                        "gemini": True,
+                        "code_generation": True,
+                        "text": True
+                    }
                 }
-            }
-            
+            else:
+                return {
+                    "status": "unhealthy",
+                    "message": "Connected to Vertex AI but Gemini model returned no content.",
+                    "project_id": self.project_id,
+                    "location": self.location,
+                    "models_available": {
+                        "gemini": False,
+                        "code_generation": False,
+                        "text": False
+                    }
+                }
         except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
             return {
                 "status": "unhealthy",
-                "error": str(e),
+                "message": f"Failed to connect or access Gemini model: {str(e)}",
                 "project_id": self.project_id,
-                "location": self.location
+                "location": self.location,
+                "models_available": {
+                    "gemini": False,
+                    "code_generation": False,
+                    "text": False
+                }
             } 
