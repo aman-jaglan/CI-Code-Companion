@@ -1,0 +1,204 @@
+spec:
+  inputs:
+    gcp_project_id:
+      description: "Google Cloud Project ID"
+      type: string
+      default: ""
+    gcp_region:
+      description: "Google Cloud region"
+      type: string
+      default: "us-central1"
+    target_branch:
+      description: "Target branch for generated tests"
+      type: string
+      default: "main"
+    source_directory:
+      description: "Directory to scan for source files"
+      type: string
+      default: "src"
+    test_framework:
+      description: "Testing framework to use"
+      type: string
+      default: "pytest"
+    language:
+      description: "Programming language"
+      type: string
+      default: "python"
+    create_mr:
+      description: "Whether to create a merge request for generated tests"
+      type: boolean
+      default: true
+    ai_model:
+      description: "Vertex AI model to use"
+      type: string
+      default: "code-bison@001"
+
+---
+
+# AI Test Generator Component
+ai_test_generator:
+  stage: test
+  image: python:3.11
+  variables:
+    GCP_PROJECT_ID: $[[ inputs.gcp_project_id ]]
+    GCP_REGION: $[[ inputs.gcp_region ]]
+    TARGET_BRANCH: $[[ inputs.target_branch ]]
+    SOURCE_DIR: $[[ inputs.source_directory ]]
+    TEST_FRAMEWORK: $[[ inputs.test_framework ]]
+    LANGUAGE: $[[ inputs.language ]]
+    CREATE_MR: $[[ inputs.create_mr ]]
+    AI_MODEL: $[[ inputs.ai_model ]]
+  before_script:
+    - echo "🤖 Starting AI Test Generation..."
+    - pip install --upgrade pip
+    - pip install google-cloud-aiplatform python-gitlab gitpython
+    - python --version
+    - echo "GCP Project: $GCP_PROJECT_ID"
+    - echo "Source Directory: $SOURCE_DIR"
+  script:
+    - |
+      python << 'EOF'
+      import os
+      import sys
+      import logging
+      from pathlib import Path
+
+      # Add the CI Code Companion to Python path
+      sys.path.insert(0, '/builds/$CI_PROJECT_PATH')
+
+      from src.ci_code_companion import VertexAIClient, TestGenerator, GitLabIntegration
+
+      # Configure logging
+      logging.basicConfig(level=logging.INFO)
+      logger = logging.getLogger(__name__)
+
+      def main():
+          try:
+              # Initialize components
+              logger.info("Initializing AI components...")
+              
+              project_id = os.getenv('GCP_PROJECT_ID')
+              if not project_id:
+                  logger.error("GCP_PROJECT_ID is required")
+                  sys.exit(1)
+              
+              # Initialize Vertex AI client
+              ai_client = VertexAIClient(
+                  project_id=project_id,
+                  location=os.getenv('GCP_REGION', 'us-central1')
+              )
+              
+              # Health check
+              health = ai_client.health_check()
+              if health['status'] != 'healthy':
+                  logger.error(f"AI client unhealthy: {health}")
+                  sys.exit(1)
+              
+              logger.info("✅ AI client initialized successfully")
+              
+              # Initialize test generator
+              test_gen = TestGenerator(ai_client)
+              
+              # Initialize GitLab integration
+              gitlab_integration = GitLabIntegration()
+              
+              # Get source directory
+              source_dir = os.getenv('SOURCE_DIR', 'src')
+              if not os.path.exists(source_dir):
+                  logger.warning(f"Source directory {source_dir} not found")
+                  return
+              
+              # Generate tests
+              logger.info(f"Generating tests for files in {source_dir}...")
+              
+              results = test_gen.batch_generate_tests(
+                  source_dir=source_dir,
+                  output_dir='generated_tests',
+                  file_patterns=['*.py'],
+                  exclude_patterns=['*test*', '*__pycache__*']
+              )
+              
+              if not results:
+                  logger.info("No tests generated - no suitable source files found")
+                  return
+              
+              logger.info(f"Generated tests for {len(results)} files")
+              
+              # Collect all generated test files
+              generated_files = {}
+              for source_file, test_files in results.items():
+                  for test_file_name, test_content in test_files.items():
+                      generated_files[f"generated_tests/{test_file_name}"] = test_content
+              
+              # Create artifacts directory
+              os.makedirs('artifacts', exist_ok=True)
+              
+              # Save generated files locally
+              for file_path, content in generated_files.items():
+                  os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                  with open(file_path, 'w') as f:
+                      f.write(content)
+                  logger.info(f"Saved: {file_path}")
+              
+              # Create summary report
+              summary = f"""# 🤖 AI Test Generation Summary
+
+              ## Generated Files
+              {chr(10).join(f'- `{path}`' for path in generated_files.keys())}
+
+              ## Statistics
+              - Source files processed: {len(results)}
+              - Test files generated: {len(generated_files)}
+              - Total lines generated: {sum(len(content.split(chr(10))) for content in generated_files.values())}
+
+              ## Model Used
+              - **Model**: {os.getenv('AI_MODEL', 'code-bison@001')}
+              - **Framework**: {os.getenv('TEST_FRAMEWORK', 'pytest')}
+              - **Language**: {os.getenv('LANGUAGE', 'python')}
+
+              Generated by CI Code Companion
+              """
+              
+              with open('artifacts/test_generation_summary.md', 'w') as f:
+                  f.write(summary)
+              
+              # Create merge request if requested
+              create_mr = os.getenv('CREATE_MR', 'true').lower() == 'true'
+              if create_mr and generated_files:
+                  logger.info("Creating merge request for generated tests...")
+                  
+                  mr_info = gitlab_integration.create_ai_generated_mr(
+                      generated_files=generated_files,
+                      source_branch_prefix="ai-generated-tests",
+                      target_branch=os.getenv('TARGET_BRANCH', 'main'),
+                      mr_title_prefix="🧪 AI Generated Tests:"
+                  )
+                  
+                  if mr_info:
+                      logger.info(f"✅ Created MR: {mr_info['web_url']}")
+                      print(f"MERGE_REQUEST_URL={mr_info['web_url']}")
+                  else:
+                      logger.warning("Failed to create merge request")
+              
+              logger.info("🎉 AI test generation completed successfully!")
+              
+          except Exception as e:
+              logger.error(f"Error in AI test generation: {str(e)}")
+              sys.exit(1)
+
+      if __name__ == "__main__":
+          main()
+      EOF
+  artifacts:
+    paths:
+      - generated_tests/
+      - artifacts/
+    reports:
+      junit: artifacts/test_generation_summary.md
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+  allow_failure: true 

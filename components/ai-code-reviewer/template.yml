@@ -1,0 +1,250 @@
+spec:
+  inputs:
+    gcp_project_id:
+      description: "Google Cloud Project ID"
+      type: string
+      default: ""
+    gcp_region:
+      description: "Google Cloud region"
+      type: string
+      default: "us-central1"
+    review_type:
+      description: "Type of review to perform"
+      type: string
+      default: "comprehensive"
+    post_comment:
+      description: "Whether to post review as MR comment"
+      type: boolean
+      default: true
+    ai_model:
+      description: "Vertex AI model to use"
+      type: string
+      default: "codechat-bison@001"
+    severity_threshold:
+      description: "Minimum severity to report (info, low, medium, high, critical)"
+      type: string
+      default: "medium"
+
+---
+
+# AI Code Reviewer Component
+ai_code_reviewer:
+  stage: test
+  image: python:3.11
+  variables:
+    GCP_PROJECT_ID: $[[ inputs.gcp_project_id ]]
+    GCP_REGION: $[[ inputs.gcp_region ]]
+    REVIEW_TYPE: $[[ inputs.review_type ]]
+    POST_COMMENT: $[[ inputs.post_comment ]]
+    AI_MODEL: $[[ inputs.ai_model ]]
+    SEVERITY_THRESHOLD: $[[ inputs.severity_threshold ]]
+  before_script:
+    - echo "🤖 Starting AI Code Review..."
+    - pip install --upgrade pip
+    - pip install google-cloud-aiplatform python-gitlab gitpython
+    - python --version
+    - echo "GCP Project: $GCP_PROJECT_ID"
+    - echo "Review Type: $REVIEW_TYPE"
+  script:
+    - |
+      python << 'EOF'
+      import os
+      import sys
+      import logging
+      from pathlib import Path
+
+      # Add the CI Code Companion to Python path
+      sys.path.insert(0, '/builds/$CI_PROJECT_PATH')
+
+      from src.ci_code_companion import VertexAIClient, CodeReviewer, GitLabIntegration
+
+      # Configure logging
+      logging.basicConfig(level=logging.INFO)
+      logger = logging.getLogger(__name__)
+
+      def main():
+          try:
+              # Initialize components
+              logger.info("Initializing AI components...")
+              
+              project_id = os.getenv('GCP_PROJECT_ID')
+              if not project_id:
+                  logger.error("GCP_PROJECT_ID is required")
+                  sys.exit(1)
+              
+              # Initialize Vertex AI client
+              ai_client = VertexAIClient(
+                  project_id=project_id,
+                  location=os.getenv('GCP_REGION', 'us-central1')
+              )
+              
+              # Health check
+              health = ai_client.health_check()
+              if health['status'] != 'healthy':
+                  logger.error(f"AI client unhealthy: {health}")
+                  sys.exit(1)
+              
+              logger.info("✅ AI client initialized successfully")
+              
+              # Initialize code reviewer
+              reviewer = CodeReviewer(ai_client)
+              
+              # Initialize GitLab integration
+              gitlab_integration = GitLabIntegration()
+              
+              review_type = os.getenv('REVIEW_TYPE', 'comprehensive')
+              
+              # Check if this is a merge request pipeline
+              if gitlab_integration.is_merge_request_pipeline():
+                  # Review merge request diff
+                  mr_id = os.getenv('CI_MERGE_REQUEST_IID')
+                  if not mr_id:
+                      logger.error("Merge request ID not found")
+                      sys.exit(1)
+                  
+                  logger.info(f"Reviewing merge request {mr_id}...")
+                  
+                  # Get MR diff
+                  mr_info = gitlab_integration.get_merge_request_diff(int(mr_id))
+                  
+                  context = {
+                      'files_changed': mr_info['files_changed'],
+                      'lines_added': mr_info['lines_added'],
+                      'lines_removed': mr_info['lines_removed'],
+                      'branch': mr_info['source_branch'],
+                      'author': mr_info['author']['name'] if mr_info.get('author') else 'Unknown'
+                  }
+                  
+                  # Perform review
+                  review_result = reviewer.review_code_diff(
+                      diff_content=mr_info['diff_content'],
+                      review_type=review_type,
+                      context=context
+                  )
+                  
+                  review_results = [review_result]
+                  
+              else:
+                  # Review changed files in current branch
+                  logger.info("Reviewing changed files...")
+                  
+                  changed_files = gitlab_integration.get_changed_files()
+                  
+                  if not changed_files:
+                      logger.info("No changed files found")
+                      return
+                  
+                  # Filter to only Python files for now
+                  python_files = [f for f in changed_files if f.endswith('.py')]
+                  
+                  if not python_files:
+                      logger.info("No Python files to review")
+                      return
+                  
+                  logger.info(f"Reviewing {len(python_files)} Python files...")
+                  
+                  # Review files
+                  review_results = reviewer.review_files(python_files, review_type)
+              
+              # Filter by severity threshold
+              severity_levels = ['info', 'low', 'medium', 'high', 'critical']
+              threshold = os.getenv('SEVERITY_THRESHOLD', 'medium')
+              threshold_index = severity_levels.index(threshold) if threshold in severity_levels else 2
+              
+              filtered_results = []
+              for result in review_results:
+                  result_severity = result.get('severity', 'info')
+                  result_index = severity_levels.index(result_severity) if result_severity in severity_levels else 0
+                  
+                  if result_index >= threshold_index:
+                      filtered_results.append(result)
+              
+              # Create artifacts directory
+              os.makedirs('artifacts', exist_ok=True)
+              
+              # Generate report
+              report = reviewer.generate_review_report(filtered_results, 'markdown')
+              
+              with open('artifacts/ai_code_review.md', 'w') as f:
+                  f.write(report)
+              
+              logger.info(f"Generated review report with {len(filtered_results)} results")
+              
+              # Create summary
+              total_issues = sum(len(r.get('issues', [])) for r in filtered_results)
+              total_recommendations = sum(len(r.get('recommendations', [])) for r in filtered_results)
+              
+              summary = f"""# 🤖 AI Code Review Summary
+
+              ## Review Details
+              - **Review Type**: {review_type.title()}
+              - **Files Reviewed**: {len(review_results)}
+              - **Issues Found**: {total_issues}
+              - **Recommendations**: {total_recommendations}
+              - **Severity Threshold**: {threshold.title()}
+
+              ## Model Used
+              - **Model**: {os.getenv('AI_MODEL', 'codechat-bison@001')}
+              - **Region**: {os.getenv('GCP_REGION', 'us-central1')}
+
+              ## Results Summary
+              """
+              
+              for severity in ['critical', 'high', 'medium', 'low', 'info']:
+                  count = sum(1 for r in filtered_results if r.get('severity') == severity)
+                  if count > 0:
+                      emoji = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🔵', 'info': '⚪'}[severity]
+                      summary += f"- {emoji} **{severity.title()}**: {count} file(s)\n"
+              
+              summary += "\nGenerated by CI Code Companion"
+              
+              with open('artifacts/review_summary.md', 'w') as f:
+                  f.write(summary)
+              
+              # Post comment to merge request if requested and applicable
+              post_comment = os.getenv('POST_COMMENT', 'true').lower() == 'true'
+              if post_comment and gitlab_integration.is_merge_request_pipeline() and filtered_results:
+                  mr_id = os.getenv('CI_MERGE_REQUEST_IID')
+                  if mr_id:
+                      logger.info("Posting review comment to merge request...")
+                      
+                      comment = gitlab_integration.format_mr_comment_for_review(
+                          filtered_results, review_type
+                      )
+                      
+                      try:
+                          note_info = gitlab_integration.add_merge_request_note(
+                              int(mr_id), comment, resolvable=False
+                          )
+                          logger.info(f"✅ Posted review comment: {note_info['note_id']}")
+                      except Exception as e:
+                          logger.warning(f"Failed to post MR comment: {str(e)}")
+              
+              # Set exit code based on critical issues
+              critical_issues = [r for r in filtered_results if r.get('severity') == 'critical']
+              if critical_issues:
+                  logger.warning(f"Found {len(critical_issues)} critical issues!")
+                  # Don't fail the pipeline for now, just warn
+                  # sys.exit(1)
+              
+              logger.info("🎉 AI code review completed successfully!")
+              
+          except Exception as e:
+              logger.error(f"Error in AI code review: {str(e)}")
+              sys.exit(1)
+
+      if __name__ == "__main__":
+          main()
+      EOF
+  artifacts:
+    paths:
+      - artifacts/
+    reports:
+      junit: artifacts/review_summary.md
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+  allow_failure: true 
