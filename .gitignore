@@ -140,3 +140,6 @@ logs/
 # CI/CD artifacts
 artifacts/
 reports/ 
+
+#secrets
+*.ci-code-companion-4a9f0060c508.json
