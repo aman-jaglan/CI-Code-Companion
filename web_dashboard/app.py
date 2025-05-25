@@ -53,8 +53,12 @@ app.config.update(
     APPLICATION_ROOT='/',
 )
 
-# Register GitLab blueprint
-app.register_blueprint(gitlab_bp)
+# Register GitLab blueprint with the correct URL prefix
+app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
+
+@app.route('/app-test-route')
+def app_test_route():
+    return "App test route is working!", 200
 
 @app.route('/')
 def dashboard():

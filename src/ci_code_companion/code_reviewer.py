@@ -8,6 +8,7 @@ import logging
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from .vertex_ai_client import VertexAIClient
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -246,79 +247,100 @@ Please format your response as:
     def _parse_review_response(self, ai_response: str, review_type: str) -> Dict[str, Any]:
         """
         Parse AI review response into structured format.
-        
-        Args:
-            ai_response: Raw AI response
-            review_type: Type of review performed
-            
-        Returns:
-            Structured review results with GitHub-like diff changes
+        The AI is expected to return blocks of:
+        ISSUE: [description]
+        LINE: [line_number]
+        OLD: [old_code_line_or_empty]
+        NEW: [new_code_line_or_multiline_block]
+        WHY: [explanation]
+        Separated by blank lines if multiple issues.
+        Or "NO_ISSUES: ..." if no issues.
         """
-        try:
-            # Initialize result structure
-            result = {
-                "review_type": review_type,
-                "issues": [],
-                "suggested_changes": [],
-                "explanation": "",
-                "severity": "info"
-            }
-            
-            # Split response into sections
-            sections = ai_response.split('\n\n')
-            current_section = None
-            current_content = []
-            
-            # Extract issues and code changes
-            for section in sections:
-                if '```diff' in section or '```python' in section:
-                    # Found code block with changes
-                    lines = section.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        if line and not line.startswith('```'):
-                            if line.startswith('+'):
-                                result["suggested_changes"].append({
-                                    "type": "add",
-                                    "line": line[1:].strip()
-                                })
-                            elif line.startswith('-'):
-                                result["suggested_changes"].append({
-                                    "type": "remove",
-                                    "line": line[1:].strip()
-                                })
-                            else:
-                                result["suggested_changes"].append({
-                                    "type": "context",
-                                    "line": line
-                                })
-                elif section.lower().startswith(('issue:', 'problem:', 'bug:')):
-                    # Found issue
-                    result["issues"].append(section.split(':', 1)[1].strip())
-                elif section.lower().startswith(('why:', 'explanation:', 'reason:')):
-                    # Found explanation
-                    result["explanation"] = section.split(':', 1)[1].strip()
-            
-            # Determine severity based on issues
-            if result["issues"]:
-                if any('critical' in issue.lower() or 'severe' in issue.lower() for issue in result["issues"]):
-                    result["severity"] = "critical"
-                elif any('security' in issue.lower() or 'vulnerability' in issue.lower() for issue in result["issues"]):
-                    result["severity"] = "high"
-                else:
-                    result["severity"] = "medium"
-            
+        logger.debug(f"Raw AI response to parse:\n{ai_response}")
+        result = {
+            "review_type": review_type,
+            "issues": [],
+            "suggested_changes": [],
+            "explanation": "", # General explanation if any, specific WHYs go into issues
+            "severity": "info"
+        }
+
+        if ai_response.strip().startswith("NO_ISSUES:"):
+            result["explanation"] = ai_response.strip().split(':', 1)[1].strip()
+            logger.info("AI reported no issues.")
             return result
+
+        # Split the response into potential blocks of issues based on double newlines or "ISSUE:"
+        # This handles cases where blank lines might be missing but "ISSUE:" starts a new block.
+        blocks = ai_response.strip().split('\n\n') # Split by blank lines first
+        
+        issues_found = []
+        current_issue_block = []
+        
+        # Re-process blocks to handle cases where ISSUE: might not be separated by double newline
+        processed_blocks = []
+        for block_text in blocks:
+            parts = block_text.split("ISSUE:")
+            if parts[0].strip() == "" and len(parts) > 1: # Starts with ISSUE:
+                processed_blocks.append("ISSUE:" + parts[1])
+            elif len(parts) > 1 : # ISSUE: is in the middle of a block
+                if parts[0].strip() != "": processed_blocks.append(parts[0].strip())
+                processed_blocks.append("ISSUE:" + parts[1])
+            else:
+                processed_blocks.append(block_text)
+
+        for block_text in processed_blocks:
+            if not block_text.strip().startswith("ISSUE:"):
+                continue
+
+            lines = block_text.strip().split('\n')
+            issue_data = {}
             
-        except Exception as e:
-            logger.error(f"Error parsing review response: {str(e)}")
-            return {
-                "review_type": review_type,
-                "issues": ["Error parsing review response: " + str(e)],
-                "suggested_changes": [],
-                "explanation": "Failed to parse AI response",
-                "severity": "error"
-            }
+            # Use a state machine or simply iterate and look for keywords
+            # to make parsing robust to slight variations if AI doesn't strictly follow format.
+            for i, line in enumerate(lines):
+                if line.startswith("ISSUE:"):
+                    issue_data['description'] = line.split(':', 1)[1].strip()
+                elif line.startswith("LINE:"):
+                    try:
+                        issue_data['line_number'] = int(line.split(':', 1)[1].strip())
+                    except ValueError:
+                        logger.warning(f"Could not parse line number from: {line}")
+                        issue_data['line_number'] = None 
+                elif line.startswith("OLD:"):
+                    issue_data['old_content'] = line.split(':', 1)[1].strip()
+                elif line.startswith("NEW:"):
+                    # Handle potential multi-line NEW content
+                    new_content_lines = [line.split(':', 1)[1].strip()]
+                    # Check subsequent lines if they are part of NEW block (not starting with another keyword)
+                    for j in range(i + 1, len(lines)):
+                        if not any(lines[j].startswith(k) for k in ["ISSUE:", "LINE:", "OLD:", "WHY:"]):
+                            new_content_lines.append(lines[j])
+                        else:
+                            break
+                    issue_data['new_content'] = "\n".join(new_content_lines)
+                elif line.startswith("WHY:"):
+                    issue_data['why'] = line.split(':', 1)[1].strip()
+            
+            if issue_data.get('description') and issue_data.get('new_content') is not None and issue_data.get('line_number') is not None:
+                result["issues"].append(issue_data['description'] + (f" (Reason: {issue_data['why']}") if issue_data.get('why') else '')
+                result["suggested_changes"].append({
+                    "line_number": issue_data['line_number'],
+                    "old_content": issue_data.get('old_content', ''), # Default to empty string if not present
+                    "new_content": issue_data['new_content'],
+                    "description": issue_data['description'],
+                    "explanation": issue_data.get('why', '')
+                })
+            elif issue_data: # Log if we parsed something but it was incomplete for a change
+                logger.warning(f"Parsed incomplete issue block: {issue_data} from block: \n{block_text}")
+
+        if result["issues"]:
+            result["severity"] = "medium" # Default severity if issues are found
+            if any("critical" in issue.lower() or "severe" in issue.lower() or "error" in issue.lower() for issue in result["issues"]):
+                result["severity"] = "high"
+        
+        logger.debug(f"Parsed AI response: {json.dumps(result, indent=2)}")
+        return result
     
     def _add_section_content(self, result: Dict, section: str, content: List[str]):
         """Add content to appropriate section of result."""

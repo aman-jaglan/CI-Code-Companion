@@ -132,20 +132,21 @@ Review the following code and identify ONLY:
 3. Missing error handling that would cause crashes
 4. Incorrect logic that would produce wrong results
 
-For each issue found, your response MUST follow this EXACT format:
+For EACH issue found, your response MUST follow this EXACT multi-line format, with each tag on a NEW line:
 
 ISSUE: [One-line description of the issue]
-LINE: [Line number where the change is needed]
-OLD: [The problematic line of code]
-NEW: [The corrected line of code]
+LINE: [Line number of the primary OLD line, or where NEW code should start if OLD is empty]
+OLD: [The EXACT problematic line of code. If adding new code where no specific old line is replaced, leave this line as: OLD: ]
+NEW: [The EXACT corrected or new line(s) of code. For multi-line additions, ensure each new physical line of code is included here.]
 WHY: [One-line explanation of why this change is needed]
 
-Example response format:
+(Ensure a blank line separates each complete ISSUE/LINE/OLD/NEW/WHY block if multiple issues are found)
+
+Example response format for a single issue:
 ISSUE: Missing is_empty method required by pop() implementation
 LINE: 12
-OLD: def pop(self):
-NEW: def is_empty(self) -> bool:
-    return len(self.items) == 0
+OLD: 
+NEW: def is_empty(self) -> bool:\n    return len(self.items) == 0
 WHY: pop() method calls is_empty() but it's not implemented
 
 If no issues affecting code execution are found, respond with exactly:
