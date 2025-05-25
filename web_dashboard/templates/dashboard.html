@@ -55,6 +55,28 @@
         </div>
         {% endif %}
 
+        {% if gitlab_connected %}
+        <!-- Connected Projects Section -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold flex items-center">
+                    <i class="fab fa-gitlab mr-2 text-orange-600"></i>
+                    Connected GitLab Projects
+                </h3>
+                <div class="text-sm text-green-600 flex items-center">
+                    <i class="fas fa-check-circle mr-1"></i>
+                    Connected
+                </div>
+            </div>
+            <div id="connected-projects-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="text-center py-4 text-gray-500">
+                    <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                    <p>Loading projects...</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Stats Overview -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div class="bg-white p-6 rounded-lg shadow-md">
@@ -271,10 +293,80 @@
             });
         }
 
+        // Load connected GitLab projects
+        async function loadConnectedProjects() {
+            try {
+                const response = await fetch('/api/connected-projects');
+                const projects = await response.json();
+                
+                const projectsList = document.getElementById('connected-projects-list');
+                projectsList.innerHTML = '';
+                
+                if (projects.length === 0) {
+                    projectsList.innerHTML = `
+                        <div class="col-span-full text-center py-8 text-gray-500">
+                            <i class="fas fa-folder-open text-3xl mb-2"></i>
+                            <p>No projects found</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                projects.forEach(project => {
+                    const projectCard = document.createElement('div');
+                    projectCard.className = 'bg-gray-50 p-4 rounded-lg border hover:shadow-md transition-shadow cursor-pointer';
+                    projectCard.innerHTML = `
+                        <div class="flex items-start justify-between mb-2">
+                            <h4 class="font-medium text-gray-900 truncate">${project.name}</h4>
+                            <i class="fas fa-external-link-alt text-gray-400 text-sm"></i>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3 line-clamp-2">${project.description || 'No description'}</p>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center text-xs text-gray-500">
+                                <i class="fas fa-code-branch mr-1"></i>
+                                <span>${project.default_branch}</span>
+                            </div>
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs">
+                                Browse Code
+                            </button>
+                        </div>
+                    `;
+                    
+                    // Add click handler to browse repository
+                    projectCard.querySelector('button').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        window.location.href = `/repository?project_id=${project.id}`;
+                    });
+                    
+                    // Add click handler for the whole card to go to GitLab
+                    projectCard.addEventListener('click', () => {
+                        window.open(project.url, '_blank');
+                    });
+                    
+                    projectsList.appendChild(projectCard);
+                });
+                
+            } catch (error) {
+                console.error('Error loading connected projects:', error);
+                const projectsList = document.getElementById('connected-projects-list');
+                projectsList.innerHTML = `
+                    <div class="col-span-full text-center py-8 text-red-500">
+                        <i class="fas fa-exclamation-triangle text-3xl mb-2"></i>
+                        <p>Error loading projects</p>
+                    </div>
+                `;
+            }
+        }
+
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
             loadRecentAnalyses();
             initCharts();
+            
+            // Check if GitLab is connected and load projects
+            {% if gitlab_connected %}
+            loadConnectedProjects();
+            {% endif %}
             
             // Refresh every 30 seconds
             setInterval(loadRecentAnalyses, 30000);

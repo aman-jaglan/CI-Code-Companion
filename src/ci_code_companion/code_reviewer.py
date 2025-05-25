@@ -78,64 +78,58 @@ Additional Context:
     def _comprehensive_review(self, diff_content: str, context_info: str) -> str:
         """Perform comprehensive code review."""
         prompt = f"""
-Please perform a comprehensive code review of the following git diff.
+Review the following code and identify any missing functionality, potential issues, or improvements needed.
+Focus on completeness, correctness, and best practices.
 
 {context_info}
 
-Git Diff:
-```diff
+Code to review:
+```python
 {diff_content}
 ```
 
-Please analyze the code changes and provide feedback on:
+Format your response exactly as follows:
 
-1. **Code Quality**:
-   - Adherence to coding standards and best practices
-   - Code readability and maintainability
-   - Proper error handling
-   - Code organization and structure
+ISSUE: [Describe each issue/missing functionality, one at a time]
 
-2. **Potential Issues**:
-   - Logic errors or bugs
-   - Edge cases not handled
-   - Potential runtime errors
-   - Inconsistencies with existing code
+```diff
+[Show exact changes needed using - for lines to remove and + for lines to add]
+```
 
-3. **Security Considerations**:
-   - Input validation
-   - Authentication/authorization issues
-   - Data exposure risks
-   - Injection vulnerabilities
+WHY: [Brief explanation of why these changes are needed]
 
-4. **Performance**:
-   - Algorithmic efficiency
-   - Memory usage considerations
-   - Database query optimization
-   - Resource management
+[Repeat ISSUE/diff/WHY blocks for each separate issue]
 
-5. **Testing**:
-   - Are tests needed for these changes?
-   - Are existing tests affected?
-   - Test coverage considerations
+If no issues are found, respond with "NO_ISSUES: Code looks good, no changes needed."
 
-Please format your response as:
+Requirements for your review:
+1. Check for missing methods/functionality in classes
+2. Verify error handling is complete
+3. Look for missing type hints
+4. Check for missing docstrings
+5. Identify any missing edge cases
+6. Verify class/function interfaces are complete
 
-## Summary
-[Brief overview of the changes and overall assessment]
+Example format:
+ISSUE: Missing peek() method in Stack class
 
-## Issues Found
-[List any problems, bugs, or concerns - use CRITICAL/HIGH/MEDIUM/LOW severity]
+```diff
+ def pop(self):
+     if not self.is_empty():
+         return self.items.pop()
+     raise IndexError("pop from empty stack")
++
++def peek(self):
++    if not self.is_empty():
++        return self.items[-1]
++    raise IndexError("peek at empty stack")
+```
 
-## Recommendations
-[Specific suggestions for improvement]
+WHY: Stack class should have peek() method to examine top item without removing it. This is a standard stack operation.
 
-## Positive Aspects
-[What was done well in this code]
-
-If no issues are found, please state that clearly.
-"""
+[Next issue block if there are more issues...]"""
         
-        return self.ai_client.analyze_code(diff_content, "review", prompt)
+        return self.ai_client.analyze_code(diff_content, "review")
     
     def _security_review(self, diff_content: str, context_info: str) -> str:
         """Perform security-focused code review."""
@@ -191,7 +185,7 @@ Please format your response as:
 [Any regulatory or compliance considerations]
 """
         
-        return self.ai_client.analyze_code(diff_content, "security", prompt)
+        return self.ai_client.analyze_code(diff_content, "security")
     
     def _performance_review(self, diff_content: str, context_info: str) -> str:
         """Perform performance-focused code review."""
@@ -247,7 +241,7 @@ Please format your response as:
 [Considerations for scale]
 """
         
-        return self.ai_client.analyze_code(diff_content, "performance", prompt)
+        return self.ai_client.analyze_code(diff_content, "performance")
     
     def _parse_review_response(self, ai_response: str, review_type: str) -> Dict[str, Any]:
         """
@@ -258,57 +252,61 @@ Please format your response as:
             review_type: Type of review performed
             
         Returns:
-            Structured review results
+            Structured review results with GitHub-like diff changes
         """
         try:
-            # Basic parsing - in a real implementation, this would be more sophisticated
-            lines = ai_response.split('\n')
-            
+            # Initialize result structure
             result = {
                 "review_type": review_type,
-                "summary": "",
                 "issues": [],
-                "recommendations": [],
-                "positive_aspects": [],
-                "severity": "info",
-                "raw_response": ai_response
+                "suggested_changes": [],
+                "explanation": "",
+                "severity": "info"
             }
             
+            # Split response into sections
+            sections = ai_response.split('\n\n')
             current_section = None
             current_content = []
             
-            for line in lines:
-                line = line.strip()
-                
-                # Detect section headers
-                if line.startswith('## Summary') or line.startswith('# Summary'):
-                    current_section = 'summary'
-                    current_content = []
-                elif line.startswith('## Issues') or line.startswith('# Issues'):
-                    current_section = 'issues'
-                    current_content = []
-                elif line.startswith('## Recommendations') or line.startswith('# Recommendations'):
-                    current_section = 'recommendations'
-                    current_content = []
-                elif line.startswith('## Positive') or line.startswith('# Positive'):
-                    current_section = 'positive_aspects'
-                    current_content = []
-                elif line.startswith('##') or line.startswith('#'):
-                    # Other section, continue collecting
-                    if current_content:
-                        self._add_section_content(result, current_section, current_content)
-                    current_section = 'other'
-                    current_content = []
+            # Extract issues and code changes
+            for section in sections:
+                if '```diff' in section or '```python' in section:
+                    # Found code block with changes
+                    lines = section.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('```'):
+                            if line.startswith('+'):
+                                result["suggested_changes"].append({
+                                    "type": "add",
+                                    "line": line[1:].strip()
+                                })
+                            elif line.startswith('-'):
+                                result["suggested_changes"].append({
+                                    "type": "remove",
+                                    "line": line[1:].strip()
+                                })
+                            else:
+                                result["suggested_changes"].append({
+                                    "type": "context",
+                                    "line": line
+                                })
+                elif section.lower().startswith(('issue:', 'problem:', 'bug:')):
+                    # Found issue
+                    result["issues"].append(section.split(':', 1)[1].strip())
+                elif section.lower().startswith(('why:', 'explanation:', 'reason:')):
+                    # Found explanation
+                    result["explanation"] = section.split(':', 1)[1].strip()
+            
+            # Determine severity based on issues
+            if result["issues"]:
+                if any('critical' in issue.lower() or 'severe' in issue.lower() for issue in result["issues"]):
+                    result["severity"] = "critical"
+                elif any('security' in issue.lower() or 'vulnerability' in issue.lower() for issue in result["issues"]):
+                    result["severity"] = "high"
                 else:
-                    if line and current_section:
-                        current_content.append(line)
-            
-            # Add final section
-            if current_content and current_section:
-                self._add_section_content(result, current_section, current_content)
-            
-            # Determine overall severity
-            result["severity"] = self._determine_severity(ai_response)
+                    result["severity"] = "medium"
             
             return result
             
@@ -316,13 +314,10 @@ Please format your response as:
             logger.error(f"Error parsing review response: {str(e)}")
             return {
                 "review_type": review_type,
-                "summary": "Error parsing review response",
-                "issues": [],
-                "recommendations": [],
-                "positive_aspects": [],
-                "severity": "error",
-                "raw_response": ai_response,
-                "parse_error": str(e)
+                "issues": ["Error parsing review response: " + str(e)],
+                "suggested_changes": [],
+                "explanation": "Failed to parse AI response",
+                "severity": "error"
             }
     
     def _add_section_content(self, result: Dict, section: str, content: List[str]):
@@ -508,4 +503,51 @@ Please format your response as:
             
             # Add more text formatting as needed
         
-        return report 
+        return report
+    
+    def review_code_content(
+        self,
+        code_content: str,
+        file_path: str,
+        review_type: str = "comprehensive"
+    ) -> Dict[str, Any]:
+        """
+        Review a string of code content.
+
+        Args:
+            code_content: The code content as a string.
+            file_path: The original path of the file for context.
+            review_type: Type of review to perform ('comprehensive', 'security', 'performance').
+
+        Returns:
+            Dictionary containing review results for the content.
+        """
+        try:
+            # Create a pseudo-diff for the entire content
+            # This allows reusing the diff-based review logic
+            diff_lines = []
+            for i, line in enumerate(code_content.splitlines(), 1):
+                diff_lines.append(f"+{line}") # Treat all lines as added
+            
+            # Ensure there's a newline at the end of each line for diff format
+            pseudo_diff_content = f"--- a/{file_path}\n+++ b/{file_path}\n" + "\n".join(diff_lines) + "\n"
+
+            context = {
+                "file_path": file_path,
+                "review_mode": "full_content"
+            }
+            
+            # Call the existing review_code_diff method
+            review_result = self.review_code_diff(pseudo_diff_content, review_type, context)
+            review_result["file_path"] = file_path # Ensure file_path is in the final result
+            return review_result
+            
+        except Exception as e:
+            logger.error(f"Error reviewing code content for {file_path}: {str(e)}")
+            return {
+                "file_path": file_path,
+                "status": "error",
+                "error": str(e),
+                "recommendations": [],
+                "severity": "unknown"
+            } 
