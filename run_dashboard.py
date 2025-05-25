@@ -1,6 +1,10 @@
 import logging
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add web_dashboard to Python path for imports
 web_dashboard_path = os.path.join(os.path.dirname(__file__), 'web_dashboard')

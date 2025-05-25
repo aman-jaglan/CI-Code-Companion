@@ -10,6 +10,7 @@ import os
 from urllib.parse import quote
 from config.gitlab_config import GitLabConfig
 import json
+from functools import wraps # Import wraps for creating decorators
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,6 +18,39 @@ logger = logging.getLogger(__name__)
 
 gitlab_bp = Blueprint('gitlab', __name__)
 gitlab_config = GitLabConfig()
+
+def get_gitlab_instance():
+    """Helper function to get a GitLab API instance from session token."""
+    if 'gitlab_token' not in session:
+        return None
+    try:
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        gl.auth() # Verify token by making a simple call
+        return gl
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.warning(f"GitLab token in session is invalid or expired: {e}")
+        session.pop('gitlab_token', None) # Remove invalid token
+        return None
+    except Exception as e:
+        logger.error(f"Error initializing GitLab instance: {e}")
+        return None
+
+def gitlab_auth_required(f):
+    """Decorator to ensure GitLab authentication for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'gitlab_token' not in session:
+            logger.warning("Access denied: No GitLab token in session.")
+            return jsonify({'error': 'Not authenticated with GitLab. Please connect GitLab first.'}), 401
+        
+        gl = get_gitlab_instance()
+        if not gl:
+            logger.warning("Access denied: GitLab token invalid or expired.")
+            return jsonify({'error': 'GitLab token is invalid or expired. Please reconnect GitLab.'}), 401
+        
+        # If authentication is successful, proceed with the original function
+        return f(*args, **kwargs)
+    return decorated_function
 
 @gitlab_bp.route('/gitlab/connect')
 def connect_gitlab():
@@ -433,4 +467,61 @@ def get_branches(project_id):
         return jsonify({'error': 'GitLab authentication failed'}), 401
     except Exception as e:
         logger.error(f"Error getting branches: {str(e)}")
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
+
+@gitlab_bp.route('/repository/<int:project_id>/commit', methods=['POST'])
+@gitlab_auth_required
+def commit_file_changes(project_id: int):
+    """Commit file changes to the GitLab repository."""
+    gl = get_gitlab_instance()
+    if not gl:
+        return jsonify({"error": "GitLab authentication failed or not configured"}), 500
+
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+        branch = data.get('branch')
+        content = data.get('content')
+        commit_message = data.get('commit_message')
+
+        if not all([file_path, branch, content, commit_message]):
+            return jsonify({"error": "Missing required parameters (file_path, branch, content, commit_message)"}), 400
+
+        project = gl.projects.get(project_id)
+        
+        # Prepare data for commit action
+        commit_data = {
+            'branch': branch,
+            'commit_message': commit_message,
+            'actions': [
+                {
+                    'action': 'update', # Or 'create' if the file doesn't exist, 'delete' to remove
+                    'file_path': file_path,
+                    'content': content
+                }
+            ]
+        }
+        
+        # Make the commit
+        commit = project.commits.create(commit_data)
+        
+        logger.info(f"Successfully committed changes to {file_path} in project {project_id} on branch {branch}. Commit ID: {commit.id}")
+        return jsonify({"success": True, "commit_id": commit.id, "commit_url": commit.web_url}), 200
+
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab authentication error during commit: {e}")
+        return jsonify({"error": f"GitLab authentication error: {e}"}), 401
+    except gitlab.exceptions.GitlabCreateError as e:
+        logger.error(f"GitLab API error during commit: {e}")
+        # e.response_body often contains more detailed error messages from GitLab
+        error_detail = str(e)
+        if hasattr(e, 'response_body') and e.response_body:
+            try:
+                response_body_json = json.loads(e.response_body.decode('utf-8'))
+                error_detail = response_body_json.get('message', str(e))
+            except json.JSONDecodeError:
+                pass # Keep original error string
+        return jsonify({"error": f"GitLab API error: {error_detail}"}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error during commit: {e}")
+        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500 

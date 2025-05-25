@@ -9,6 +9,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs/loader.min.js"></script>
+    <style>
+        #monaco-editor-container {
+            width: 100%;
+            height: 600px; /* Adjust as needed */
+            border: 1px solid #ddd;
+            border-radius: 0.375rem; /* Corresponds to rounded-lg */
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <!-- Header -->
@@ -105,12 +114,18 @@
                                     <i class="fas fa-magic mr-1"></i>
                                     AI Improve
                                 </button>
+                                <button id="commit-push-btn" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1 rounded text-sm" style="display: none;">
+                                    <i class="fas fa-upload mr-1"></i>
+                                    Commit & Push
+                                </button>
                             </div>
                         </div>
                     </div>
                     <div class="p-4">
                         <div id="file-content-area">
-                            <div class="text-center py-12 text-gray-500">
+                            <!-- Monaco Editor will be placed here -->
+                            <div id="monaco-editor-container"></div> 
+                             <div class="text-center py-12 text-gray-500" id="file-content-placeholder">
                                 <i class="fas fa-file-code text-4xl mb-4"></i>
                                 <p class="text-lg">Select a file from the repository tree to view its content</p>
                                 <p class="text-sm mt-2">Use AI-powered tools to review, improve, and generate tests for your code</p>
@@ -154,6 +169,10 @@
         let currentBranch = null;
         let currentPath = '';
         let currentFile = null;
+        let monacoEditor = null; // Monaco Editor instance
+
+        // Initialize Monaco Editor paths
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs' }});
 
         // Initialize repository browser
         async function initRepository() {
@@ -297,27 +316,49 @@
                 document.getElementById('current-file-name').textContent = data.file_name;
                 document.getElementById('file-actions').style.display = 'flex';
                 
-                const contentArea = document.getElementById('file-content-area');
-                const language = getLanguageFromFilename(data.file_name);
+                const editorContainer = document.getElementById('monaco-editor-container');
+                const placeholder = document.getElementById('file-content-placeholder');
                 
-                contentArea.innerHTML = `
-                    <div class="bg-gray-50 border rounded-lg">
-                        <div class="p-3 border-b bg-gray-100 text-sm text-gray-600">
-                            <div class="flex justify-between items-center">
-                                <span>${data.file_path}</span>
-                                <span>${formatFileSize(data.size)}</span>
-                            </div>
-                        </div>
-                        <pre id="code-content" class="p-4 overflow-x-auto"><code class="language-${language}">${escapeHtml(data.content)}</code></pre>
-                    </div>
-                `;
-                
-                // Highlight syntax
-                Prism.highlightAll();
+                // Hide placeholder, show editor
+                if (placeholder) placeholder.style.display = 'none';
+                editorContainer.style.display = 'block';
+
+                // Dispose existing editor if any
+                if (monacoEditor) {
+                    monacoEditor.dispose();
+                }
+
+                require(['vs/editor/editor.main'], function() {
+                    monacoEditor = monaco.editor.create(editorContainer, {
+                        value: data.content,
+                        language: getMonacoLanguageFromFilename(data.file_name),
+                        theme: 'vs-light', // Or 'vs-dark'
+                        readOnly: false, // Start as editable, will manage readonly state later
+                        automaticLayout: true,
+                        minimap: { enabled: true }
+                    });
+                    // Hide commit button when a new file is loaded
+                    document.getElementById('commit-push-btn').style.display = 'none';
+                    // Also, listen for manual changes in the editor to show the commit button
+                    monacoEditor.onDidChangeModelContent(() => {
+                        if (monacoEditor && currentFile) {
+                            const commitBtn = document.getElementById('commit-push-btn');
+                            if (monacoEditor.getValue() !== currentFile.content) {
+                                commitBtn.style.display = 'inline-block';
+                            } else {
+                                commitBtn.style.display = 'none';
+                            }
+                        }
+                    });
+                });
                 
             } catch (error) {
                 console.error('Error loading file:', error);
                 alert('Error loading file: ' + error.message);
+                const editorContainer = document.getElementById('monaco-editor-container');
+                const placeholder = document.getElementById('file-content-placeholder');
+                if (placeholder) placeholder.style.display = 'block';
+                editorContainer.style.display = 'none';
             }
         }
 
@@ -370,10 +411,10 @@
             const modal = document.getElementById('loading-modal');
             const resultsPanel = document.getElementById('ai-results-panel');
             const resultsContent = document.getElementById('ai-results-content');
-            const codeContent = document.getElementById('code-content');
             
             modal.style.display = 'flex';
-            modal.querySelector('p').textContent = loadingMessage;
+            const loadingModalText = modal.querySelector('p.text-lg.font-medium');
+            if (loadingModalText) loadingModalText.textContent = loadingMessage;
             
             try {
                 const response = await fetch('/api/ai-analyze', {
@@ -384,7 +425,7 @@
                     body: JSON.stringify({
                         action: action,
                         file_path: currentFile.file_path,
-                        content: currentFile.content,
+                        content: monacoEditor ? monacoEditor.getValue() : currentFile.content,
                         project_id: currentProjectId,
                         branch: currentBranch
                     })
@@ -393,44 +434,125 @@
                 const result = await response.json();
                 console.log('AI Analysis Result:', result);
 
-                if (action === 'review' && result.analysis && result.analysis.suggested_changes) {
-                    // Get the original code lines
-                    let codeLines = currentFile.content.split('\n');
-                    
-                    // Apply the changes
-                    for (const change of result.analysis.suggested_changes) {
-                        if (change.line_number && change.new_content) {
-                            codeLines[change.line_number - 1] = `<span class="bg-green-100">${escapeHtml(change.new_content)}</span>`;
-                            if (change.old_content) {
-                                codeLines.splice(change.line_number - 1, 0, 
-                                    `<span class="bg-red-100 line-through">${escapeHtml(change.old_content)}</span>`);
+                if (action === 'review' && result.analysis) {
+                    let issuesForNotification = result.analysis.issues || [];
+                    let suggestedChanges = result.analysis.suggested_changes || [];
+
+                    if (suggestedChanges.length > 0) {
+                        resultsContent.innerHTML = `
+                            <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded space-y-3">
+                                <div class="text-sm text-blue-700">
+                                    <i class="fas fa-info-circle mr-2"></i>
+                                    Found ${issuesForNotification.length} issue(s) and ${suggestedChanges.length} potential change(s):
+                                    ${issuesForNotification.length > 0 ? `<ul class="list-disc list-inside mt-2">${issuesForNotification.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>` : ''}
+                                </div>
+                                <button id="apply-ai-changes-btn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                                    <i class="fas fa-check mr-2"></i>Apply Suggested Changes
+                                </button>
+                                <div id="applied-changes-info" class="text-sm text-green-700 mt-2"></div>
+                            </div>
+                        `;
+
+                        document.getElementById('apply-ai-changes-btn').addEventListener('click', () => {
+                            if (monacoEditor && suggestedChanges.length > 0) {
+                                const edits = suggestedChanges.map(change => {
+                                    const lineNumber = parseInt(change.line_number, 10);
+                                    const oldContent = change.old_content || '';
+                                    const newContent = change.new_content || '';
+                                    
+                                    // Monaco line numbers are 1-based
+                                    const range = new monaco.Range(lineNumber, 1, lineNumber, monacoEditor.getModel().getLineMaxColumn(lineNumber));
+                                    
+                                    return { range: range, text: newContent };
+                                }).filter(edit => edit.range && edit.text !== null); // Filter out invalid edits
+
+                                // Apply edits to the model
+                                monacoEditor.getModel().pushEditOperations([], edits, () => null);
+                                
+                                document.getElementById('applied-changes-info').textContent = 'Changes applied to the editor!';
+                                document.getElementById('apply-ai-changes-btn').disabled = true;
+                                document.getElementById('apply-ai-changes-btn').classList.add('opacity-50', 'cursor-not-allowed');
+                                
+                                // Show Commit & Push button
+                                document.getElementById('commit-push-btn').style.display = 'inline-block';
                             }
-                        }
+                        });
+
+                        // Add event listener for Commit & Push button
+                        document.getElementById('commit-push-btn').addEventListener('click', async () => {
+                            if (!monacoEditor || !currentFile) return;
+
+                            const newContent = monacoEditor.getValue();
+                            if (newContent === currentFile.content) {
+                                alert('No changes to commit.');
+                                return;
+                            }
+
+                            const commitMessage = prompt("Enter commit message:", `Update ${currentFile.file_name} with AI suggestions`);
+                            if (!commitMessage) return; // User cancelled
+
+                            const modal = document.getElementById('loading-modal');
+                            const loadingModalText = modal.querySelector('p.text-lg.font-medium');
+                            modal.style.display = 'flex';
+                            if (loadingModalText) loadingModalText.textContent = 'Committing and pushing changes to GitLab...';
+
+                            try {
+                                const response = await fetch(`/gitlab/repository/${currentProjectId}/commit`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                    },
+                                    body: JSON.stringify({
+                                        file_path: currentFile.file_path,
+                                        branch: currentBranch,
+                                        content: newContent,
+                                        commit_message: commitMessage
+                                    })
+                                });
+
+                                const result = await response.json();
+
+                                if (response.ok && result.success) {
+                                    alert('Changes committed and pushed successfully!');
+                                    // Update currentFile content to reflect the committed state
+                                    currentFile.content = newContent;
+                                    document.getElementById('commit-push-btn').style.display = 'none'; // Hide after success
+                                } else {
+                                    alert(`Error committing changes: ${result.error || 'Unknown error'}`);
+                                }
+                            } catch (error) {
+                                console.error('Commit/Push error:', error);
+                                alert(`Failed to commit/push: ${error.message}`);
+                            } finally {
+                                modal.style.display = 'none';
+                            }
+                        });
+
+                    } else {
+                        resultsContent.innerHTML = `
+                            <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
+                                <div class="text-sm text-green-700">
+                                    <i class="fas fa-check-circle mr-2"></i>
+                                    ${issuesForNotification.length > 0 ? escapeHtml(issuesForNotification.join('. ')) : 'Code looks good, no specific changes suggested.'}
+                                </div>
+                            </div>
+                        `;
                     }
-                    
-                    // Update the code view with changes highlighted
-                    codeContent.innerHTML = `<code class="language-${getLanguageFromFilename(currentFile.file_name)}">${codeLines.join('\n')}</code>`;
-                    Prism.highlightElement(codeContent.querySelector('code'));
-                    
-                    // Show a small notification with the number of changes
-                    resultsContent.innerHTML = `
-                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                            <div class="text-sm text-blue-700">
-                                <i class="fas fa-info-circle mr-2"></i>
-                                Found ${result.analysis.suggested_changes.length} issue(s) in the code. Changes are highlighted above:
-                                <ul class="list-disc list-inside mt-2">
-                                    ${result.analysis.issues.map(issue => `<li>${issue}</li>`).join('')}
-                                </ul>
+                } else if (result.error) {
+                     resultsContent.innerHTML = `
+                        <div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                            <div class="text-sm text-red-600">
+                                <i class="fas fa-exclamation-circle mr-2"></i>
+                                Error during analysis: ${escapeHtml(result.error)}
                             </div>
                         </div>
                     `;
                 } else {
-                    // Show success message if no changes needed
-                    resultsContent.innerHTML = `
-                        <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                            <div class="text-sm text-green-700">
-                                <i class="fas fa-check-circle mr-2"></i>
-                                Code looks good, no changes needed.
+                    // Fallback for other actions or no specific review data
+                     resultsContent.innerHTML = `
+                        <div class="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
+                            <div class="text-sm text-gray-700">
+                               Analysis complete. ${result.message || 'No specific feedback provided.'}
                             </div>
                         </div>
                     `;
@@ -444,7 +566,7 @@
                     <div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
                         <div class="text-sm text-red-600">
                             <i class="fas fa-exclamation-circle mr-2"></i>
-                            Error during analysis: ${error.message}
+                            Error during AI analysis: ${error.message}
                         </div>
                     </div>
                 `;
@@ -469,6 +591,35 @@
                 'yaml': 'yaml'
             };
             return langMap[ext] || 'text';
+        }
+
+        function getMonacoLanguageFromFilename(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            // Monaco has slightly different language IDs sometimes
+            const langMap = {
+                'py': 'python',
+                'js': 'javascript',
+                'ts': 'typescript',
+                'html': 'html',
+                'css': 'css',
+                'json': 'json',
+                'md': 'markdown',
+                'yml': 'yaml',
+                'yaml': 'yaml',
+                'java': 'java',
+                'c': 'c',
+                'cpp': 'cpp',
+                'cs': 'csharp',
+                'go': 'go',
+                'php': 'php',
+                'rb': 'ruby',
+                'rs': 'rust',
+                'swift': 'swift',
+                'sh': 'shell',
+                'sql': 'sql',
+                'xml': 'xml'
+            };
+            return langMap[ext] || 'plaintext'; // Default to plaintext
         }
 
         function formatFileSize(bytes) {
