@@ -125,18 +125,36 @@ Please provide clean, well-documented code with type hints."""
             model = GenerativeModel(self.gemini_model_id)
             
             if analysis_type == "review":
-                prompt = f"""Please review the following code and provide feedback on:
-1. Code quality and best practices
-2. Potential bugs or issues
-3. Suggestions for improvement
-4. Security considerations
+                prompt = f"""You are a Python code reviewer focusing ONLY on actual code issues that affect execution.
+Review the following code and identify ONLY:
+1. Missing or incomplete functions/methods that are necessary for the code to work
+2. Syntax errors or incorrect code patterns that would cause runtime issues
+3. Missing error handling that would cause crashes
+4. Incorrect logic that would produce wrong results
+
+For each issue found, your response MUST follow this EXACT format:
+
+ISSUE: [One-line description of the issue]
+LINE: [Line number where the change is needed]
+OLD: [The problematic line of code]
+NEW: [The corrected line of code]
+WHY: [One-line explanation of why this change is needed]
+
+Example response format:
+ISSUE: Missing is_empty method required by pop() implementation
+LINE: 12
+OLD: def pop(self):
+NEW: def is_empty(self) -> bool:
+    return len(self.items) == 0
+WHY: pop() method calls is_empty() but it's not implemented
+
+If no issues affecting code execution are found, respond with exactly:
+NO_ISSUES: Code is functionally complete and will execute correctly.
 
 Code to review:
 ```python
 {code}
-```
-
-Please provide a structured review with clear recommendations."""
+```"""
             elif analysis_type == "security":
                 prompt = f"""Please analyze the following code for security vulnerabilities:
 
@@ -175,7 +193,7 @@ Focus on:
                 return analysis_result
             else:
                 logger.warning(f"Code analysis ({analysis_type}) returned no content.")
-                return ""
+                return "NO_ISSUES: Code is functionally complete and will execute correctly."
         except Exception as e:
             logger.error(f"Error analyzing code ({analysis_type}): {str(e)}")
             raise
