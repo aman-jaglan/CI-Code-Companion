@@ -9,6 +9,7 @@ import logging
 import os
 from urllib.parse import quote
 from config.gitlab_config import GitLabConfig
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -180,18 +181,75 @@ def gitlab_webhook():
 def analyze_commit(project_id: int, commit_id: str, branch: str):
     """Analyze a specific commit."""
     # Import analysis modules
-    from src.code_reviewer import CodeReviewer
-    from src.test_generator import TestGenerator
-    from src.vertex_ai_client import VertexAIClient
+    from src.ci_code_companion.code_reviewer import CodeReviewer
+    from src.ci_code_companion.test_generator import TestGenerator
+    from src.ci_code_companion.vertex_ai_client import VertexAIClient
     
     # Initialize components
-    ai_client = VertexAIClient()
+    gcp_project_id = os.getenv('GCP_PROJECT_ID')
+    if not gcp_project_id:
+        logger.error("GCP_PROJECT_ID environment variable not set for webhook analysis.")
+        return
+    ai_client = VertexAIClient(project_id=gcp_project_id)
     reviewer = CodeReviewer(ai_client)
-    test_gen = TestGenerator(ai_client)
-    
-    # Perform analysis
-    # This would be implemented based on your existing analysis logic
-    pass
+    # test_gen = TestGenerator(ai_client) # Not used yet
+
+    try:
+        logger.info(f"Analyzing commit {commit_id} in project {project_id} on branch {branch}")
+        
+        # Ensure GitLab token is available from a global/secure place if not in session
+        # For webhook, session is not available. Consider how to securely get a token.
+        # This is a placeholder: In a real app, use a service account or app token for webhooks.
+        if not gitlab_config.is_configured or not os.getenv('GITLAB_ACCESS_TOKEN'):
+            logger.error("GitLab access token for webhook analysis is not configured.")
+            return
+
+        gl = gitlab.Gitlab('https://gitlab.com', private_token=os.getenv('GITLAB_ACCESS_TOKEN'))
+        gl.auth() # Verify token
+
+        project = gl.projects.get(project_id)
+        commit_obj = project.commits.get(commit_id)
+        diffs = commit_obj.diff()
+
+        if not diffs:
+            logger.info(f"No diffs found for commit {commit_id}. Nothing to analyze.")
+            return
+
+        for diff_item in diffs:
+            if diff_item['new_file'] or diff_item['renamed_file'] or diff_item['deleted_file']:
+                logger.info(f"Skipping analysis for new/renamed/deleted file: {diff_item.get('new_path', diff_item.get('old_path'))}")
+                continue # Or handle these cases specifically
+            
+            file_path = diff_item['new_path']
+            logger.info(f"Analyzing file: {file_path}")
+            
+            try:
+                file_content_bytes = project.files.get(file_path=file_path, ref=commit_id).decode()
+                file_content = file_content_bytes.decode('utf-8')
+                
+                logger.info(f"Reviewing code for {file_path}...")
+                review_result = reviewer.review_code(file_content, file_path)
+                
+                # Log or store the review result
+                logger.info(f"Review for {file_path} in commit {commit_id}:")
+                logger.info(json.dumps(review_result, indent=2)) # Using json.dumps for pretty print
+                
+                # Here you would typically store this result in a database
+                # and/or send notifications.
+
+            except gitlab.exceptions.GitlabGetError as e:
+                logger.error(f"Could not get file {file_path} from commit {commit_id}: {e}")
+            except Exception as e:
+                logger.error(f"Error analyzing file {file_path} in commit {commit_id}: {e}")
+
+        logger.info(f"Finished analyzing commit {commit_id}")
+
+    except gitlab.exceptions.GitlabAuthenticationError as e:
+        logger.error(f"GitLab authentication failed during commit analysis: {e}")
+    except gitlab.exceptions.GitlabGetError as e:
+        logger.error(f"Failed to get project or commit details from GitLab: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error in analyze_commit for {commit_id}: {e}")
 
 def analyze_merge_request(project_id: int, mr_id: int, source_branch: str):
     """Analyze a merge request."""

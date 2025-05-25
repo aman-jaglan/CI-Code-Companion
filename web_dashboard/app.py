@@ -249,13 +249,17 @@ def ai_analyze():
         from src.ci_code_companion.test_generator import TestGenerator
         
         # Initialize AI components
-        ai_client = VertexAIClient()
+        gcp_project_id = os.getenv('GCP_PROJECT_ID')
+        if not gcp_project_id:
+            logger.error("GCP_PROJECT_ID environment variable not set.")
+            return jsonify({'error': 'AI service not configured (missing GCP_PROJECT_ID)'}), 500
+        ai_client = VertexAIClient(project_id=gcp_project_id)
         
         result = {}
         
         if action == 'review':
             reviewer = CodeReviewer(ai_client)
-            review_result = reviewer.review_code(content, file_path)
+            review_result = reviewer.review_code_content(content, file_path)
             result = {
                 'action': 'review',
                 'file_path': file_path,
@@ -276,7 +280,7 @@ def ai_analyze():
         elif action == 'improve':
             reviewer = CodeReviewer(ai_client)
             # Get code improvement suggestions
-            improvement_result = reviewer.suggest_improvements(content, file_path)
+            improvement_result = reviewer.review_code_content(content, file_path, review_type="comprehensive")
             result = {
                 'action': 'improve',
                 'file_path': file_path,

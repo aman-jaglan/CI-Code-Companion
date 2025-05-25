@@ -135,7 +135,7 @@ Please format your response as:
 If no issues are found, please state that clearly.
 """
         
-        return self.ai_client.analyze_code(diff_content, "review", prompt)
+        return self.ai_client.analyze_code(diff_content, "review")
     
     def _security_review(self, diff_content: str, context_info: str) -> str:
         """Perform security-focused code review."""
@@ -191,7 +191,7 @@ Please format your response as:
 [Any regulatory or compliance considerations]
 """
         
-        return self.ai_client.analyze_code(diff_content, "security", prompt)
+        return self.ai_client.analyze_code(diff_content, "security")
     
     def _performance_review(self, diff_content: str, context_info: str) -> str:
         """Perform performance-focused code review."""
@@ -247,7 +247,7 @@ Please format your response as:
 [Considerations for scale]
 """
         
-        return self.ai_client.analyze_code(diff_content, "performance", prompt)
+        return self.ai_client.analyze_code(diff_content, "performance")
     
     def _parse_review_response(self, ai_response: str, review_type: str) -> Dict[str, Any]:
         """
@@ -508,4 +508,51 @@ Please format your response as:
             
             # Add more text formatting as needed
         
-        return report 
+        return report
+    
+    def review_code_content(
+        self,
+        code_content: str,
+        file_path: str,
+        review_type: str = "comprehensive"
+    ) -> Dict[str, Any]:
+        """
+        Review a string of code content.
+
+        Args:
+            code_content: The code content as a string.
+            file_path: The original path of the file for context.
+            review_type: Type of review to perform ('comprehensive', 'security', 'performance').
+
+        Returns:
+            Dictionary containing review results for the content.
+        """
+        try:
+            # Create a pseudo-diff for the entire content
+            # This allows reusing the diff-based review logic
+            diff_lines = []
+            for i, line in enumerate(code_content.splitlines(), 1):
+                diff_lines.append(f"+{line}") # Treat all lines as added
+            
+            # Ensure there's a newline at the end of each line for diff format
+            pseudo_diff_content = f"--- a/{file_path}\n+++ b/{file_path}\n" + "\n".join(diff_lines) + "\n"
+
+            context = {
+                "file_path": file_path,
+                "review_mode": "full_content"
+            }
+            
+            # Call the existing review_code_diff method
+            review_result = self.review_code_diff(pseudo_diff_content, review_type, context)
+            review_result["file_path"] = file_path # Ensure file_path is in the final result
+            return review_result
+            
+        except Exception as e:
+            logger.error(f"Error reviewing code content for {file_path}: {str(e)}")
+            return {
+                "file_path": file_path,
+                "status": "error",
+                "error": str(e),
+                "recommendations": [],
+                "severity": "unknown"
+            } 

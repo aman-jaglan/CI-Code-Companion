@@ -375,7 +375,7 @@
             modal.querySelector('p').textContent = loadingMessage;
             
             try {
-                // This would call your AI analysis endpoint
+                // Call AI analysis endpoint
                 const response = await fetch('/api/ai-analyze', {
                     method: 'POST',
                     headers: {
@@ -391,13 +391,29 @@
                 });
                 
                 const result = await response.json();
+                console.log('AI Analysis Result:', result); // Debug log
                 
-                resultsContent.innerHTML = formatAIResults(action, result);
+                // Handle different response formats
+                let formattedResult;
+                if (result.error) {
+                    formattedResult = `<div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                        <h5 class="font-medium mb-2 text-red-700">Error</h5>
+                        <div class="text-sm text-red-600">${result.error}</div>
+                    </div>`;
+                } else {
+                    formattedResult = formatAIResults(action, result);
+                }
+                
+                resultsContent.innerHTML = formattedResult;
                 resultsPanel.style.display = 'block';
                 
             } catch (error) {
                 console.error('AI analysis error:', error);
-                alert('AI analysis failed: ' + error.message);
+                resultsContent.innerHTML = `<div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                    <h5 class="font-medium mb-2 text-red-700">Error</h5>
+                    <div class="text-sm text-red-600">AI analysis failed: ${error.message}</div>
+                </div>`;
+                resultsPanel.style.display = 'block';
             } finally {
                 modal.style.display = 'none';
             }
@@ -412,10 +428,76 @@
                         <i class="fas fa-search text-blue-600 text-xl mr-3"></i>
                         <h4 class="text-lg font-medium">Code Review Results</h4>
                     </div>
-                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                        <div class="text-sm text-blue-700 whitespace-pre-wrap">${result.analysis || 'Analysis completed successfully'}</div>
-                    </div>
                 `;
+
+                // Handle both structured and raw response formats
+                if (typeof result === 'string') {
+                    // If result is a plain string
+                    html += `
+                        <div class="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
+                            <div class="text-sm text-gray-700 whitespace-pre-wrap">${result}</div>
+                        </div>
+                    `;
+                } else {
+                    // If result is an object with analysis
+                    const review = result.analysis || {};
+                    
+                    // If we have a raw response and no structured data, show it directly
+                    if (review.raw_response && (!review.summary && (!review.issues || review.issues.length === 0))) {
+                        html += `
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
+                                <div class="text-sm text-gray-700 whitespace-pre-wrap">${review.raw_response}</div>
+                            </div>
+                        `;
+                    } else {
+                        // Summary section
+                        if (review.summary) {
+                            html += `
+                                <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+                                    <h5 class="font-medium mb-2">Summary</h5>
+                                    <div class="text-sm text-blue-700 whitespace-pre-wrap">${review.summary}</div>
+                                </div>
+                            `;
+                        }
+
+                        // Issues section
+                        if (review.issues && review.issues.length > 0) {
+                            html += `
+                                <div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                                    <h5 class="font-medium mb-2">Issues Found</h5>
+                                    <ul class="list-disc list-inside text-sm text-red-700 space-y-1">
+                                        ${review.issues.map(issue => `<li>${issue}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+
+                        // Recommendations section
+                        if (review.recommendations && review.recommendations.length > 0) {
+                            html += `
+                                <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
+                                    <h5 class="font-medium mb-2">Recommendations</h5>
+                                    <ul class="list-disc list-inside text-sm text-green-700 space-y-1">
+                                        ${review.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+
+                        // Positive aspects section
+                        if (review.positive_aspects && review.positive_aspects.length > 0) {
+                            html += `
+                                <div class="bg-purple-50 border-l-4 border-purple-400 p-4 rounded">
+                                    <h5 class="font-medium mb-2">Positive Aspects</h5>
+                                    <ul class="list-disc list-inside text-sm text-purple-700 space-y-1">
+                                        ${review.positive_aspects.map(pos => `<li>${pos}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                    }
+                }
+
             } else if (action === 'test-generation') {
                 html += `
                     <div class="flex items-center mb-4">
@@ -423,7 +505,7 @@
                         <h4 class="text-lg font-medium">Generated Tests</h4>
                     </div>
                     <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                        <div class="text-sm text-green-700 whitespace-pre-wrap">${result.tests || 'Tests generated successfully'}</div>
+                        <div class="text-sm text-green-700 whitespace-pre-wrap">${result.tests || 'No tests generated'}</div>
                     </div>
                 `;
             } else if (action === 'improve') {
@@ -432,10 +514,39 @@
                         <i class="fas fa-magic text-purple-600 text-xl mr-3"></i>
                         <h4 class="text-lg font-medium">Code Improvements</h4>
                     </div>
-                    <div class="bg-purple-50 border-l-4 border-purple-400 p-4 rounded">
-                        <div class="text-sm text-purple-700 whitespace-pre-wrap">${result.improvements || 'Improvements suggested successfully'}</div>
-                    </div>
                 `;
+
+                const improvements = result.improvements || {};
+                
+                // Use the same structured format as review
+                if (improvements.summary) {
+                    html += `
+                        <div class="bg-purple-50 border-l-4 border-purple-400 p-4 rounded">
+                            <h5 class="font-medium mb-2">Summary</h5>
+                            <div class="text-sm text-purple-700 whitespace-pre-wrap">${improvements.summary}</div>
+                        </div>
+                    `;
+                }
+
+                if (improvements.recommendations && improvements.recommendations.length > 0) {
+                    html += `
+                        <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
+                            <h5 class="font-medium mb-2">Suggested Improvements</h5>
+                            <ul class="list-disc list-inside text-sm text-green-700 space-y-1">
+                                ${improvements.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+
+                // If no structured data is available, show raw response
+                if (improvements.raw_response && !improvements.summary && (!improvements.recommendations || improvements.recommendations.length === 0)) {
+                    html += `
+                        <div class="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
+                            <div class="text-sm text-gray-700 whitespace-pre-wrap">${improvements.raw_response}</div>
+                        </div>
+                    `;
+                }
             }
             
             html += `
