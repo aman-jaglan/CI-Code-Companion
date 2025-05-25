@@ -52,7 +52,7 @@ def gitlab_auth_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-@gitlab_bp.route('/gitlab/connect')
+@gitlab_bp.route('/connect')
 def connect_gitlab():
     """Start GitLab OAuth flow."""
     if not gitlab_config.is_configured:
@@ -67,7 +67,7 @@ def connect_gitlab():
     logger.info(f"Starting GitLab OAuth flow - redirecting to: {auth_url}")
     return redirect(auth_url)
 
-@gitlab_bp.route('/gitlab/callback')
+@gitlab_bp.route('/callback')
 def gitlab_callback():
     """Handle GitLab OAuth callback."""
     logger.info("Received GitLab callback")
@@ -155,7 +155,7 @@ def gitlab_callback():
         logger.error(f"Unexpected error in callback: {str(e)}")
         return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
-@gitlab_bp.route('/gitlab/projects')
+@gitlab_bp.route('/projects')
 def list_projects():
     """List user's GitLab projects."""
     if 'gitlab_token' not in session:
@@ -181,7 +181,7 @@ def list_projects():
         logger.error(f"Error listing projects: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@gitlab_bp.route('/gitlab/webhook', methods=['POST'])
+@gitlab_bp.route('/webhook', methods=['POST'])
 def gitlab_webhook():
     """Handle GitLab webhook events."""
     event = request.headers.get('X-Gitlab-Event')
@@ -290,7 +290,7 @@ def analyze_merge_request(project_id: int, mr_id: int, source_branch: str):
     # Similar to analyze_commit, but for merge requests
     pass
 
-@gitlab_bp.route('/gitlab/repository/<int:project_id>/tree')
+@gitlab_bp.route('/repository/<int:project_id>/tree')
 def get_repository_tree(project_id):
     """Get repository file tree structure."""
     if 'gitlab_token' not in session:
@@ -332,7 +332,7 @@ def get_repository_tree(project_id):
         logger.error(f"Error getting repository tree: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@gitlab_bp.route('/gitlab/repository/<int:project_id>/file')
+@gitlab_bp.route('/repository/<int:project_id>/file')
 def get_file_content(project_id):
     """Get file content from repository."""
     if 'gitlab_token' not in session:
@@ -375,7 +375,7 @@ def get_file_content(project_id):
         logger.error(f"Error getting file content: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@gitlab_bp.route('/gitlab/repository/<int:project_id>/commits')
+@gitlab_bp.route('/repository/<int:project_id>/commits')
 def get_commits(project_id):
     """Get recent commits for a repository."""
     if 'gitlab_token' not in session:
@@ -422,7 +422,7 @@ def get_commits(project_id):
         logger.error(f"Error getting commits: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@gitlab_bp.route('/gitlab/repository/<int:project_id>/branches')
+@gitlab_bp.route('/repository/<int:project_id>/branches')
 def get_branches(project_id):
     """Get repository branches."""
     if 'gitlab_token' not in session:

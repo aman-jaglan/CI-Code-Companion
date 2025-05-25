@@ -20,7 +20,7 @@ class GitLabConfig:
         
         self.app_id = os.getenv('GITLAB_APP_ID')
         self.app_secret = os.getenv('GITLAB_APP_SECRET')
-        self.redirect_uri = os.getenv('GITLAB_REDIRECT_URI', 'http://localhost:5001/gitlab/callback')
+        self.redirect_uri = os.getenv('GITLAB_REDIRECT_URI', 'http://localhost:5001/callback')
         self.scope = 'api read_registry write_registry'
         
         # Log detailed configuration status
