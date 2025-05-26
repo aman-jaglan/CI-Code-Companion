@@ -17,6 +17,125 @@
             border: 1px solid #ddd;
             border-radius: 0.375rem; /* Corresponds to rounded-lg */
         }
+        
+        .code-block {
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            tab-size: 4;
+        }
+        
+        .code-block pre {
+            margin: 0;
+            padding: 8px;
+            white-space: pre;
+            overflow-x: auto;
+        }
+        
+        .code-diff {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin: 8px 0;
+        }
+        
+        .code-diff-header {
+            padding: 8px;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        .code-diff-content {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .code-diff-line {
+            display: flex;
+            align-items: flex-start;
+            padding: 0 8px;
+            min-height: 24px;
+            position: relative;
+        }
+        
+        .code-diff-line-number {
+            width: 40px;
+            padding-right: 8px;
+            color: #6b7280;
+            text-align: right;
+            user-select: none;
+        }
+        
+        .code-diff-line-content {
+            flex: 1;
+            padding: 0 8px;
+            white-space: pre;
+        }
+        
+        .code-diff-line.removed {
+            background-color: #fee2e2;
+        }
+        
+        .code-diff-line.removed .code-diff-line-content {
+            color: #991b1b;
+        }
+        
+        .code-diff-line.added {
+            background-color: #dcfce7;
+        }
+        
+        .code-diff-line.added .code-diff-line-content {
+            color: #166534;
+        }
+        
+        .code-diff-line-marker {
+            width: 20px;
+            padding: 0 4px;
+            color: #6b7280;
+            user-select: none;
+        }
+        
+        .code-diff-line.removed .code-diff-line-marker {
+            color: #991b1b;
+        }
+        
+        .code-diff-line.added .code-diff-line-marker {
+            color: #166534;
+        }
+        
+        .change-actions {
+            position: sticky;
+            top: 0;
+            background-color: white;
+            padding: 8px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            z-index: 10;
+        }
+        
+        .suggestion-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        
+        .suggestion-card-header {
+            padding: 12px;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .suggestion-card-content {
+            padding: 0;
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -174,6 +293,57 @@
         // Initialize Monaco Editor paths
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.30.1/min/vs' }});
 
+        // Helper function to escape HTML special characters
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Function to create a diff view for code changes
+        function createDiffView(oldContent, newContent) {
+            const oldLines = oldContent.split('\n');
+            const newLines = newContent.split('\n');
+            
+            let diffHtml = '<div class="code-diff">';
+            
+            // Add header
+            diffHtml += `
+                <div class="code-diff-header">
+                    <div class="flex items-center justify-between">
+                        <span>Code Change</span>
+                        <span class="text-sm text-gray-500">${oldLines.length} line(s) → ${newLines.length} line(s)</span>
+                    </div>
+                </div>
+                <div class="code-diff-content">
+            `;
+            
+            // Add removed lines
+            oldLines.forEach((line, i) => {
+                diffHtml += `
+                    <div class="code-diff-line removed">
+                        <div class="code-diff-line-number">${i + 1}</div>
+                        <div class="code-diff-line-marker">-</div>
+                        <div class="code-diff-line-content">${escapeHtml(line)}</div>
+                    </div>
+                `;
+            });
+            
+            // Add added lines
+            newLines.forEach((line, i) => {
+                diffHtml += `
+                    <div class="code-diff-line added">
+                        <div class="code-diff-line-number">${i + 1}</div>
+                        <div class="code-diff-line-marker">+</div>
+                        <div class="code-diff-line-content">${escapeHtml(line)}</div>
+                    </div>
+                `;
+            });
+            
+            diffHtml += '</div></div>';
+            return diffHtml;
+        }
+
         // Initialize repository browser
         async function initRepository() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -329,24 +499,42 @@
                 }
 
                 require(['vs/editor/editor.main'], function() {
+                    // Configure Monaco editor with diff support
                     monacoEditor = monaco.editor.create(editorContainer, {
                         value: data.content,
                         language: getMonacoLanguageFromFilename(data.file_name),
-                        theme: 'vs-light', // Or 'vs-dark'
-                        readOnly: false, // Start as editable, will manage readonly state later
+                        theme: 'vs-light',
+                        readOnly: false,
                         automaticLayout: true,
-                        minimap: { enabled: true }
+                        minimap: { enabled: true },
+                        renderLineHighlight: 'all',
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        renderIndicators: true,
+                        // Add diff-specific settings
+                        diffDecorations: {
+                            renderIndicators: true,
+                            ignoreTrimWhitespace: false
+                        }
                     });
-                    // Hide commit button when a new file is loaded
-                    document.getElementById('commit-push-btn').style.display = 'none';
-                    // Also, listen for manual changes in the editor to show the commit button
+
+                    // Store original content for diff comparison
+                    monacoEditor.originalContent = data.content;
+
+                    // Add change tracking
                     monacoEditor.onDidChangeModelContent(() => {
                         if (monacoEditor && currentFile) {
+                            const newContent = monacoEditor.getValue();
                             const commitBtn = document.getElementById('commit-push-btn');
-                            if (monacoEditor.getValue() !== currentFile.content) {
+                            
+                            if (newContent !== currentFile.content) {
                                 commitBtn.style.display = 'inline-block';
+                                // Add diff decorations
+                                updateDiffDecorations(monacoEditor.originalContent, newContent);
                             } else {
                                 commitBtn.style.display = 'none';
+                                // Clear decorations if no changes
+                                monacoEditor.deltaDecorations([], []);
                             }
                         }
                     });
@@ -361,6 +549,139 @@
                 editorContainer.style.display = 'none';
             }
         }
+
+        // Function to update diff decorations
+        function updateDiffDecorations(originalContent, newContent) {
+            if (!monacoEditor) return;
+
+            const originalLines = originalContent.split('\n');
+            const newLines = newContent.split('\n');
+            const decorations = [];
+            
+            // Simple diff implementation
+            let lineNumber = 1;
+            for (let i = 0; i < Math.max(originalLines.length, newLines.length); i++) {
+                const originalLine = originalLines[i] || '';
+                const newLine = newLines[i] || '';
+                
+                if (originalLine !== newLine) {
+                    if (!originalLine && newLine) {
+                        // Added line
+                        decorations.push({
+                            range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+                            options: {
+                                isWholeLine: true,
+                                linesDecorationsClassName: 'diff-added-margin',
+                                className: 'diff-added',
+                                glyphMarginClassName: 'diff-added-glyph'
+                            }
+                        });
+                    } else if (originalLine && !newLine) {
+                        // Removed line
+                        decorations.push({
+                            range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+                            options: {
+                                isWholeLine: true,
+                                linesDecorationsClassName: 'diff-removed-margin',
+                                className: 'diff-removed',
+                                glyphMarginClassName: 'diff-removed-glyph'
+                            }
+                        });
+                    } else {
+                        // Modified line
+                        decorations.push({
+                            range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+                            options: {
+                                isWholeLine: true,
+                                linesDecorationsClassName: 'diff-modified-margin',
+                                className: 'diff-modified',
+                                glyphMarginClassName: 'diff-modified-glyph'
+                            }
+                        });
+                    }
+                }
+                lineNumber++;
+            }
+            
+            // Apply decorations
+            monacoEditor.deltaDecorations([], decorations);
+        }
+
+        // Function to analyze code structure and determine proper indentation
+        function analyzeCodeStructure(code) {
+            const lines = code.split('\n');
+            let indentLevel = 0;
+            const indentSize = 4; // Default Python indentation
+            const indentMap = new Map(); // Maps line numbers to required indent levels
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+                
+                // Check for class or function definitions
+                if (trimmedLine.startsWith('class ') || trimmedLine.startsWith('def ')) {
+                    indentMap.set(i, indentLevel);
+                    indentLevel++;
+                    continue;
+                }
+                
+                // Check for control structures that increase indent
+                if (trimmedLine.endsWith(':')) {
+                    indentMap.set(i, indentLevel);
+                    indentLevel++;
+                    continue;
+                }
+                
+                // Check for empty lines
+                if (trimmedLine === '') {
+                    indentMap.set(i, indentLevel);
+                    continue;
+                }
+                
+                // Check for dedent markers
+                if (trimmedLine.startsWith('return ') || 
+                    trimmedLine.startsWith('break') || 
+                    trimmedLine.startsWith('continue')) {
+                    indentLevel = Math.max(0, indentLevel - 1);
+                }
+                
+                indentMap.set(i, indentLevel);
+            }
+            
+            return {
+                indentMap,
+                indentSize
+            };
+        }
+
+        // Function to apply proper indentation to code
+        function applyProperIndentation(code) {
+            const { indentMap, indentSize } = analyzeCodeStructure(code);
+            const lines = code.split('\n');
+            
+            return lines.map((line, index) => {
+                const trimmedLine = line.trim();
+                if (trimmedLine === '') return '';
+                
+                const indent = indentMap.get(index) || 0;
+                return ' '.repeat(indent * indentSize) + trimmedLine;
+            }).join('\n');
+        }
+
+        // Add styles for diff highlighting
+        const style = document.createElement('style');
+        style.textContent = `
+            .diff-added { background-color: rgba(155, 255, 155, 0.2); }
+            .diff-removed { background-color: rgba(255, 155, 155, 0.2); }
+            .diff-modified { background-color: rgba(255, 255, 155, 0.2); }
+            .diff-added-margin { border-left: 3px solid #28a745; }
+            .diff-removed-margin { border-left: 3px solid #dc3545; }
+            .diff-modified-margin { border-left: 3px solid #ffc107; }
+            .diff-added-glyph:before { content: '+'; color: #28a745; margin-left: -20px; }
+            .diff-removed-glyph:before { content: '-'; color: #dc3545; margin-left: -20px; }
+            .diff-modified-glyph:before { content: '•'; color: #ffc107; margin-left: -20px; }
+        `;
+        document.head.appendChild(style);
 
         async function loadRecentCommits() {
             const response = await fetch(`/gitlab/repository/${currentProjectId}/commits?branch=${currentBranch}&per_page=10`);
@@ -414,7 +735,9 @@
             
             modal.style.display = 'flex';
             const loadingModalText = modal.querySelector('p.text-lg.font-medium');
-            if (loadingModalText) loadingModalText.textContent = loadingMessage;
+            if (loadingModalText) {
+                loadingModalText.textContent = loadingMessage;
+            }
             
             try {
                 const response = await fetch('/api/ai-analyze', {
@@ -427,7 +750,8 @@
                         file_path: currentFile.file_path,
                         content: monacoEditor ? monacoEditor.getValue() : currentFile.content,
                         project_id: currentProjectId,
-                        branch: currentBranch
+                        branch: currentBranch,
+                        language: getMonacoLanguageFromFilename(currentFile.file_name)
                     })
                 });
                 
@@ -435,124 +759,40 @@
                 console.log('AI Analysis Result:', result);
 
                 if (action === 'review' && result.analysis) {
-                    let issuesForNotification = result.analysis.issues || [];
+                    let issues = result.analysis.issues || [];
                     let suggestedChanges = result.analysis.suggested_changes || [];
 
-                    if (suggestedChanges.length > 0) {
-                        resultsContent.innerHTML = `
-                            <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded space-y-3">
-                                <div class="text-sm text-blue-700">
-                                    <i class="fas fa-info-circle mr-2"></i>
-                                    Found ${issuesForNotification.length} issue(s) and ${suggestedChanges.length} potential change(s):
-                                    ${issuesForNotification.length > 0 ? `<ul class="list-disc list-inside mt-2">${issuesForNotification.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>` : ''}
-                                </div>
-                                <button id="apply-ai-changes-btn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
-                                    <i class="fas fa-check mr-2"></i>Apply Suggested Changes
-                                </button>
-                                <div id="applied-changes-info" class="text-sm text-green-700 mt-2"></div>
-                            </div>
-                        `;
+                    if (issues.length > 0 || suggestedChanges.length > 0) {
+                        const issuesHtmlPromise = generateIssuesHtml(issues, suggestedChanges);
+                        const issuesHtml = await issuesHtmlPromise;
+                        resultsContent.innerHTML = issuesHtml;
 
-                        document.getElementById('apply-ai-changes-btn').addEventListener('click', () => {
-                            if (monacoEditor && suggestedChanges.length > 0) {
-                                const edits = suggestedChanges.map(change => {
-                                    const lineNumber = parseInt(change.line_number, 10);
-                                    const oldContent = change.old_content || '';
-                                    const newContent = change.new_content || '';
-                                    
-                                    // Monaco line numbers are 1-based
-                                    const range = new monaco.Range(lineNumber, 1, lineNumber, monacoEditor.getModel().getLineMaxColumn(lineNumber));
-                                    
-                                    return { range: range, text: newContent };
-                                }).filter(edit => edit.range && edit.text !== null); // Filter out invalid edits
+                        // Store suggested changes in a global variable for later use
+                        window.currentSuggestedChanges = suggestedChanges;
 
-                                // Apply edits to the model
-                                monacoEditor.getModel().pushEditOperations([], edits, () => null);
-                                
-                                document.getElementById('applied-changes-info').textContent = 'Changes applied to the editor!';
-                                document.getElementById('apply-ai-changes-btn').disabled = true;
-                                document.getElementById('apply-ai-changes-btn').classList.add('opacity-50', 'cursor-not-allowed');
-                                
-                                // Show Commit & Push button
-                                document.getElementById('commit-push-btn').style.display = 'inline-block';
-                            }
-                        });
-
-                        // Add event listener for Commit & Push button
-                        document.getElementById('commit-push-btn').addEventListener('click', async () => {
-                            if (!monacoEditor || !currentFile) return;
-
-                            const newContent = monacoEditor.getValue();
-                            if (newContent === currentFile.content) {
-                                alert('No changes to commit.');
-                                return;
-                            }
-
-                            const commitMessage = prompt("Enter commit message:", `Update ${currentFile.file_name} with AI suggestions`);
-                            if (!commitMessage) return; // User cancelled
-
-                            const modal = document.getElementById('loading-modal');
-                            const loadingModalText = modal.querySelector('p.text-lg.font-medium');
-                            modal.style.display = 'flex';
-                            if (loadingModalText) loadingModalText.textContent = 'Committing and pushing changes to GitLab...';
-
-                            try {
-                                const response = await fetch(`/gitlab/repository/${currentProjectId}/commit`, {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                    },
-                                    body: JSON.stringify({
-                                        file_path: currentFile.file_path,
-                                        branch: currentBranch,
-                                        content: newContent,
-                                        commit_message: commitMessage
-                                    })
-                                });
-
-                                const result = await response.json();
-
-                                if (response.ok && result.success) {
-                                    alert('Changes committed and pushed successfully!');
-                                    // Update currentFile content to reflect the committed state
-                                    currentFile.content = newContent;
-                                    document.getElementById('commit-push-btn').style.display = 'none'; // Hide after success
-                                } else {
-                                    alert(`Error committing changes: ${result.error || 'Unknown error'}`);
-                                }
-                            } catch (error) {
-                                console.error('Commit/Push error:', error);
-                                alert(`Failed to commit/push: ${error.message}`);
-                            } finally {
-                                modal.style.display = 'none';
-                            }
-                        });
-
+                        // Add event listener for "Apply All Changes" button
+                        const applyAllBtn = document.getElementById('apply-all-changes-btn');
+                        if (applyAllBtn) {
+                            applyAllBtn.addEventListener('click', () => {
+                                applyAllChanges(suggestedChanges);
+                            });
+                        }
                     } else {
                         resultsContent.innerHTML = `
                             <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
                                 <div class="text-sm text-green-700">
                                     <i class="fas fa-check-circle mr-2"></i>
-                                    ${issuesForNotification.length > 0 ? escapeHtml(issuesForNotification.join('. ')) : 'Code looks good, no specific changes suggested.'}
+                                    No issues found. Code looks good!
                                 </div>
                             </div>
                         `;
                     }
                 } else if (result.error) {
-                     resultsContent.innerHTML = `
+                    resultsContent.innerHTML = `
                         <div class="bg-red-50 border-l-4 border-red-400 p-4 rounded">
                             <div class="text-sm text-red-600">
                                 <i class="fas fa-exclamation-circle mr-2"></i>
                                 Error during analysis: ${escapeHtml(result.error)}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    // Fallback for other actions or no specific review data
-                     resultsContent.innerHTML = `
-                        <div class="bg-gray-50 border-l-4 border-gray-400 p-4 rounded">
-                            <div class="text-sm text-gray-700">
-                               Analysis complete. ${result.message || 'No specific feedback provided.'}
                             </div>
                         </div>
                     `;
@@ -574,6 +814,353 @@
             } finally {
                 modal.style.display = 'none';
             }
+        }
+
+        async function generateIssuesHtml(issues, suggestedChanges) {
+            // Group suggestions by issue
+            const suggestionsByIssue = new Map();
+            issues.forEach((issue, index) => {
+                suggestionsByIssue.set(index, suggestedChanges.filter(change => 
+                    change.issue_index === index || change.related_issue === issue
+                ));
+            });
+
+            let issuesHtml = `
+                <div class="bg-white rounded-lg shadow">
+                    <div class="p-4 border-b border-gray-200">
+                        <h3 class="text-lg font-semibold text-gray-900">
+                            <i class="fas fa-code-branch text-blue-600 mr-2"></i>
+                            Code Review Results
+                        </h3>
+                        <p class="text-sm text-gray-600 mt-1">
+                            Found ${issues.length} issue(s) with suggested improvements
+                        </p>
+                    </div>
+                    <div class="divide-y divide-gray-200">
+            `;
+
+            // Create expandable sections for each issue
+            for (let i = 0; i < issues.length; i++) {
+                const issue = issues[i];
+                const relatedChanges = suggestionsByIssue.get(i) || [];
+                const hasChanges = relatedChanges.length > 0;
+
+                issuesHtml += `
+                    <div class="suggestion-card">
+                        <div class="suggestion-card-header">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <span class="inline-flex items-center justify-center h-6 w-6 rounded-full ${getSeverityBgClass(issue.severity)}">
+                                        ${getSeverityIcon(issue.severity)}
+                                    </span>
+                                    <span class="font-medium">Issue #${i + 1}</span>
+                                </div>
+                                <span class="text-sm px-2 py-1 rounded ${getCategoryClass(issue.category)}">
+                                    ${issue.category}
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-700 mt-2">${escapeHtml(issue.description)}</p>
+                        </div>
+                        
+                        <div class="suggestion-card-content">
+                `;
+
+                if (hasChanges) {
+                    for (let j = 0; j < relatedChanges.length; j++) {
+                        const change = relatedChanges[j];
+                        const diffView = await createDiffView(change.old_content, change.new_content);
+
+                        issuesHtml += `
+                            <div class="border-t border-gray-200">
+                                <div class="p-4">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <h4 class="text-sm font-medium text-gray-900">
+                                            <i class="fas fa-code mr-2 text-blue-600"></i>
+                                            Suggested Change ${j + 1}
+                                        </h4>
+                                        <button 
+                                            class="apply-change-btn bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+                                            data-change-index="${i}-${j}"
+                                            onclick="applySpecificChange(${i}, ${j})"
+                                        >
+                                            Apply Change
+                                        </button>
+                                    </div>
+                                    
+                                    ${diffView}
+                                    
+                                    ${change.explanation ? `
+                                        <div class="mt-2 text-sm text-gray-600">
+                                            <i class="fas fa-info-circle mr-1"></i>
+                                            ${escapeHtml(change.explanation)}
+                                        </div>
+                                    ` : ''}
+                                    
+                                    ${change.impact && change.impact.length > 0 ? `
+                                        <div class="mt-2 flex flex-wrap gap-2">
+                                            ${change.impact.map(impact => `
+                                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                    <i class="fas fa-impact mr-1"></i>
+                                                    ${escapeHtml(impact)}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    issuesHtml += `
+                        <div class="p-4 text-sm text-gray-500 italic">
+                            No specific code changes suggested for this issue.
+                        </div>
+                    `;
+                }
+
+                issuesHtml += `
+                        </div>
+                    </div>
+                `;
+            }
+
+            issuesHtml += `
+                    </div>
+                    ${suggestedChanges.length > 0 ? `
+                        <div class="p-4 bg-gray-50 border-t border-gray-200">
+                            <button id="apply-all-changes-btn" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">
+                                <i class="fas fa-check-circle mr-2"></i>
+                                Apply All Changes
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            return issuesHtml;
+        }
+
+        function getSeverityBgClass(severity) {
+            const classes = {
+                'critical': 'bg-red-100 text-red-800',
+                'high': 'bg-orange-100 text-orange-800',
+                'medium': 'bg-yellow-100 text-yellow-800',
+                'low': 'bg-green-100 text-green-800'
+            };
+            return classes[severity] || classes.medium;
+        }
+
+        function getSeverityIcon(severity) {
+            const icons = {
+                'critical': '<i class="fas fa-exclamation-triangle"></i>',
+                'high': '<i class="fas fa-exclamation-circle"></i>',
+                'medium': '<i class="fas fa-exclamation"></i>',
+                'low': '<i class="fas fa-info-circle"></i>'
+            };
+            return icons[severity] || icons.medium;
+        }
+
+        function getCategoryClass(category) {
+            const classes = {
+                'security': 'bg-red-100 text-red-800',
+                'performance': 'bg-blue-100 text-blue-800',
+                'reliability': 'bg-yellow-100 text-yellow-800',
+                'maintainability': 'bg-purple-100 text-purple-800',
+                'style': 'bg-gray-100 text-gray-800'
+            };
+            return classes[category] || 'bg-gray-100 text-gray-800';
+        }
+
+        // Function to apply a specific change
+        async function applySpecificChange(issueIndex, changeIndex) {
+            const changes = window.currentSuggestedChanges;
+            const change = changes.find(c => c.issue_index === issueIndex && c.change_index === changeIndex);
+            
+            if (!change || !monacoEditor) return;
+            
+            try {
+                const model = monacoEditor.getModel();
+                const lineNumber = parseInt(change.line_number, 10);
+                
+                // Get the current line's indentation
+                const currentLine = model.getLineContent(lineNumber);
+                const currentIndent = currentLine.match(/^\s*/)[0];
+                
+                // Calculate the range of lines to replace
+                const oldLines = change.old_content.split('\n');
+                const startLineNumber = lineNumber;
+                const endLineNumber = lineNumber + oldLines.length - 1;
+                
+                // Apply proper indentation to new content
+                const newLines = change.new_content.split('\n').map(line => {
+                    const trimmedLine = line.trim();
+                    if (!trimmedLine) return '';
+                    
+                    const additionalIndent = calculateAdditionalIndent(trimmedLine, currentIndent.length / 4);
+                    return currentIndent + '    '.repeat(additionalIndent) + trimmedLine;
+                });
+                
+                // Create edit operation
+                const edit = {
+                    range: new monaco.Range(
+                        startLineNumber,
+                        1,
+                        endLineNumber,
+                        model.getLineMaxColumn(endLineNumber)
+                    ),
+                    text: newLines.join('\n')
+                };
+                
+                // Apply the edit
+                model.pushEditOperations([], [edit], () => null);
+                
+                // Update UI
+                const button = document.querySelector(`button[data-change-index="${issueIndex}-${changeIndex}"]`);
+                if (button) {
+                    button.disabled = true;
+                    button.classList.add('opacity-50', 'cursor-not-allowed', 'bg-gray-500');
+                    button.textContent = 'Applied';
+                }
+                
+                // Show commit button
+                document.getElementById('commit-push-btn').style.display = 'inline-block';
+                
+                // Update diff decorations
+                updateDiffDecorations(monacoEditor.originalContent, model.getValue());
+                
+                // Add decorations for the changed lines
+                const decorations = [];
+                
+                // Add decoration for removed lines
+                decorations.push({
+                    range: new monaco.Range(startLineNumber, 1, endLineNumber, 1),
+                    options: {
+                        isWholeLine: true,
+                        className: 'removed-line-decoration',
+                        glyphMarginClassName: 'removed-line-glyph'
+                    }
+                });
+                
+                // Add decoration for added lines
+                const newLineCount = newLines.length;
+                decorations.push({
+                    range: new monaco.Range(startLineNumber, 1, startLineNumber + newLineCount - 1, 1),
+                    options: {
+                        isWholeLine: true,
+                        className: 'added-line-decoration',
+                        glyphMarginClassName: 'added-line-glyph'
+                    }
+                });
+                
+                // Apply decorations
+                monacoEditor.deltaDecorations([], decorations);
+            } catch (error) {
+                console.error('Error applying change:', error);
+            }
+        }
+
+        // Function to apply all changes
+        async function applyAllChanges(changes) {
+            if (!monacoEditor || !changes.length) return;
+            
+            try {
+                const model = monacoEditor.getModel();
+                const edits = [];
+                
+                // Sort changes by line number in descending order
+                changes.sort((a, b) => parseInt(b.line_number) - parseInt(a.line_number));
+                
+                for (const change of changes) {
+                    const lineNumber = parseInt(change.line_number, 10);
+                    const currentLine = model.getLineContent(lineNumber);
+                    const currentIndent = currentLine.match(/^\s*/)[0];
+                    
+                    const newLines = change.new_content.split('\n').map(line => {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine) return '';
+                        
+                        const additionalIndent = calculateAdditionalIndent(trimmedLine, currentIndent.length / 4);
+                        return currentIndent + '    '.repeat(additionalIndent) + trimmedLine;
+                    });
+                    
+                    edits.push({
+                        range: new monaco.Range(
+                            lineNumber,
+                            1,
+                            lineNumber + (change.old_content.split('\n').length - 1),
+                            model.getLineMaxColumn(lineNumber + (change.old_content.split('\n').length - 1))
+                        ),
+                        text: newLines.join('\n')
+                    });
+                }
+                
+                // Apply all edits in one operation
+                model.pushEditOperations([], edits, () => null);
+                
+                // Update UI
+                const applyButtons = document.querySelectorAll('.apply-change-btn');
+                applyButtons.forEach(button => {
+                    button.disabled = true;
+                    button.classList.add('opacity-50', 'cursor-not-allowed', 'bg-gray-500');
+                    button.textContent = 'Applied';
+                });
+                
+                document.getElementById('apply-all-changes-btn').disabled = true;
+                document.getElementById('apply-all-changes-btn').classList.add('opacity-50', 'cursor-not-allowed', 'bg-gray-500');
+                document.getElementById('commit-push-btn').style.display = 'inline-block';
+                
+                // Update diff decorations
+                updateDiffDecorations(monacoEditor.originalContent, model.getValue());
+            } catch (error) {
+                console.error('Error applying all changes:', error);
+            }
+        }
+
+        function calculateAdditionalIndent(line, baseIndent) {
+            let indent = 0;
+            
+            // Check for block starters
+            if (line.match(/^(class|def|if|for|while|try|with|async|match)\b.*:$/)) {
+                indent = 1;
+            }
+            // Check for continuation of previous block
+            else if (line.match(/^(elif|else|except|finally)\b.*:$/)) {
+                indent = 0;
+            }
+            // Check for nested function/method calls or list/dict comprehensions
+            else if (line.match(/[\[\{\(].*[^\]\}\)]$/)) {
+                indent = 1;
+            }
+            // Check for closing brackets/braces
+            else if (line.match(/^[\]\}\)]/)) {
+                indent = -1;
+            }
+            
+            return Math.max(0, baseIndent + indent);
+        }
+
+        // Function to analyze code context
+        function analyzeCodeContext(code, lineNumber) {
+            const lines = code.split('\n');
+            let contextIndent = 0;
+            
+            // Look at previous lines to determine context
+            for (let i = lineNumber - 1; i >= 0; i--) {
+                const line = lines[i].trim();
+                if (line.endsWith(':')) {
+                    contextIndent++;
+                }
+                // Look for class/method definitions
+                if (line.startsWith('class ') || line.startsWith('def ')) {
+                    contextIndent++;
+                }
+                // Look for dedents
+                if (line.startsWith('return') || line.startsWith('break') || line.startsWith('continue')) {
+                    contextIndent = Math.max(0, contextIndent - 1);
+                }
+            }
+            
+            return contextIndent;
         }
 
         // Utility functions
@@ -640,12 +1227,6 @@
             } else {
                 return date.toLocaleDateString();
             }
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
         }
 
         // Initialize when page loads

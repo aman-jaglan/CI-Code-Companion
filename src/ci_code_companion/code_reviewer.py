@@ -78,59 +78,10 @@ Additional Context:
     
     def _comprehensive_review(self, diff_content: str, context_info: str) -> str:
         """Perform comprehensive code review."""
-        prompt = f"""
-Review the following code and identify any missing functionality, potential issues, or improvements needed.
-Focus on completeness, correctness, and best practices.
-
-{context_info}
-
-Code to review:
-```python
-{diff_content}
-```
-
-Format your response exactly as follows:
-
-ISSUE: [Describe each issue/missing functionality, one at a time]
-
-```diff
-[Show exact changes needed using - for lines to remove and + for lines to add]
-```
-
-WHY: [Brief explanation of why these changes are needed]
-
-[Repeat ISSUE/diff/WHY blocks for each separate issue]
-
-If no issues are found, respond with "NO_ISSUES: Code looks good, no changes needed."
-
-Requirements for your review:
-1. Check for missing methods/functionality in classes
-2. Verify error handling is complete
-3. Look for missing type hints
-4. Check for missing docstrings
-5. Identify any missing edge cases
-6. Verify class/function interfaces are complete
-
-Example format:
-ISSUE: Missing peek() method in Stack class
-
-```diff
- def pop(self):
-     if not self.is_empty():
-         return self.items.pop()
-     raise IndexError("pop from empty stack")
-+
-+def peek(self):
-+    if not self.is_empty():
-+        return self.items[-1]
-+    raise IndexError("peek at empty stack")
-```
-
-WHY: Stack class should have peek() method to examine top item without removing it. This is a standard stack operation.
-
-[Next issue block if there are more issues...]"""
+        # Include context info in the prompt
+        prompt = self._get_review_prompt(diff_content, f"diff_content{context_info}")
         
-        return self.ai_client.analyze_code(diff_content, "review")
+        return self.ai_client.analyze_code(prompt, "review")
     
     def _security_review(self, diff_content: str, context_info: str) -> str:
         """Perform security-focused code review."""
@@ -572,4 +523,84 @@ Please format your response as:
                 "error": str(e),
                 "recommendations": [],
                 "severity": "unknown"
-            } 
+            }
+    
+    def _get_review_prompt(self, code, file_path):
+        """Generate a comprehensive code review prompt."""
+        # Define the suggestion format template separately to avoid f-string issues
+        suggestion_format = '''{
+    "issue_description": "Clear description of the issue",
+    "line_number": "Line number where the issue occurs",
+    "old_content": "The exact problematic code with proper indentation",
+    "new_content": "The suggested fix with proper indentation",
+    "explanation": "Detailed explanation of why this is an issue and how the fix helps",
+    "impact": ["List", "of", "impacts"],
+    "severity": "critical|high|medium|low",
+    "category": "security|performance|reliability|maintainability|style"
+}'''
+
+        return f"""Please perform a thorough code review of the following code from {file_path}. 
+    
+Code to review:
+```
+{code}
+```
+
+Analyze the code for the following aspects and provide specific, actionable feedback:
+
+1. Code Quality and Best Practices:
+   - Identify any violations of coding standards or best practices
+   - Check for code readability and maintainability issues
+   - Look for opportunities to improve code organization
+   - Verify proper error handling and logging
+   - Check for proper use of comments and documentation
+
+2. Security Issues:
+   - Identify potential security vulnerabilities
+   - Check for proper input validation
+   - Verify secure handling of sensitive data
+   - Look for authentication/authorization issues
+   - Check for proper use of security-related functions
+
+3. Performance Optimization:
+   - Identify performance bottlenecks
+   - Look for inefficient algorithms or data structures
+   - Check for unnecessary computations or operations
+   - Identify potential memory leaks
+   - Suggest performance improvements
+
+4. Code Structure and Design:
+   - Evaluate class and function organization
+   - Check for proper separation of concerns
+   - Identify violations of SOLID principles
+   - Look for opportunities to improve design patterns
+   - Check for code duplication
+
+5. Bug Detection:
+   - Identify potential runtime errors
+   - Look for edge cases that aren't handled
+   - Check for off-by-one errors
+   - Verify proper null/undefined checks
+   - Identify potential race conditions
+
+For each issue found, please provide:
+1. A clear description of the issue
+2. The exact location (line numbers) where the issue occurs
+3. The problematic code snippet
+4. A detailed explanation of why it's an issue
+5. A specific, properly indented code suggestion to fix the issue
+6. The expected impact of the fix
+
+Format each suggestion exactly as follows:
+{suggestion_format}
+
+Additional requirements:
+1. Maintain the exact same indentation level as the surrounding code
+2. Ensure all code blocks are complete (no partial blocks)
+3. Include necessary imports or dependencies
+4. Consider the context of the entire file
+5. Preserve the existing coding style
+6. Ensure backward compatibility
+7. Follow language-specific best practices
+
+Please be thorough and specific in your review.""" 
