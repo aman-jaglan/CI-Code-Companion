@@ -243,6 +243,7 @@ def ai_analyze():
         content = data.get('content')
         project_id = data.get('project_id')
         branch = data.get('branch')
+        language = data.get('language', 'python')
         
         if not all([action, file_path, content]):
             return jsonify({'error': 'Missing required parameters'}), 400
@@ -259,11 +260,182 @@ def ai_analyze():
             return jsonify({'error': 'AI service not configured (missing GCP_PROJECT_ID)'}), 500
         ai_client = VertexAIClient(project_id=gcp_project_id)
         
+        def extract_code_context(content, line_number, context_lines=3):
+            """Extract code context around a specific line."""
+            lines = content.split('\n')
+            start = max(0, line_number - context_lines - 1)
+            end = min(len(lines), line_number + context_lines)
+            
+            return {
+                'start_line': start + 1,
+                'end_line': end,
+                'code': '\n'.join(lines[start:end]),
+                'focus_line': line_number
+            }
+        
+        def analyze_issue_context(content, issue_description):
+            """Analyze the context of an issue to find relevant code sections."""
+            lines = content.split('\n')
+            context = None
+            
+            # Look for code patterns mentioned in the issue
+            for i, line in enumerate(lines, 1):
+                # Extract potential code snippets or patterns from issue description
+                if any(pattern in line for pattern in extract_code_patterns(issue_description)):
+                    context = extract_code_context(content, i)
+                    break
+            
+            return context
+        
+        def extract_code_patterns(description):
+            """Extract potential code patterns from issue description."""
+            # Extract quoted code, function names, variable names, etc.
+            patterns = []
+            
+            # Look for quoted code
+            import re
+            quoted = re.findall(r'`([^`]+)`', description)
+            patterns.extend(quoted)
+            
+            # Look for common code patterns
+            code_patterns = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*\([^)]*\))', description)
+            patterns.extend(code_patterns)
+            
+            return patterns
+        
+        def analyze_code_structure(code, lang='python'):
+            """Analyze code structure to determine proper indentation and context."""
+            lines = code.split('\n')
+            structure = {
+                'indent_map': {},
+                'context_map': {},
+                'block_starts': set(),
+                'block_ends': set(),
+                'indent_size': 4 if lang in ['python'] else 2
+            }
+            
+            stack = []
+            current_class = None
+            current_function = None
+            
+            for i, line in enumerate(lines):
+                line_num = i + 1
+                trimmed = line.strip()
+                
+                # Skip empty lines but maintain context
+                if not trimmed:
+                    structure['indent_map'][line_num] = len(stack)
+                    continue
+                
+                # Detect block starts
+                if trimmed.endswith(':'):
+                    structure['block_starts'].add(line_num)
+                    stack.append(line_num)
+                
+                # Track class and function context
+                if trimmed.startswith('class '):
+                    current_class = trimmed.split('class ')[1].split('(')[0].split(':')[0].strip()
+                    structure['context_map'][line_num] = {'class': current_class, 'function': None}
+                elif trimmed.startswith('def '):
+                    current_function = trimmed.split('def ')[1].split('(')[0].strip()
+                    structure['context_map'][line_num] = {'class': current_class, 'function': current_function}
+                
+                # Detect block ends
+                if stack and (trimmed.startswith('return') or trimmed.startswith('break') or 
+                            trimmed.startswith('continue') or trimmed.startswith('raise')):
+                    structure['block_ends'].add(line_num)
+                    if stack:
+                        stack.pop()
+                
+                # Store indentation level
+                structure['indent_map'][line_num] = len(stack)
+            
+            return structure
+        
+        def apply_proper_indentation(code, structure):
+            """Apply proper indentation based on code structure analysis."""
+            lines = code.split('\n')
+            result = []
+            
+            for i, line in enumerate(lines, 1):
+                if not line.strip():
+                    result.append('')
+                    continue
+                
+                indent_level = structure['indent_map'].get(i, 0)
+                indent = ' ' * (indent_level * structure['indent_size'])
+                result.append(indent + line.strip())
+            
+            return '\n'.join(result)
+        
+        def complete_code_block(code, structure, language):
+            """Complete code blocks by adding necessary closing statements."""
+            lines = code.split('\n')
+            completions = []
+            
+            # Add missing block endings
+            for block_start in structure['block_starts']:
+                if block_start not in structure['block_ends']:
+                    indent_level = structure['indent_map'].get(block_start, 0)
+                    indent = ' ' * (indent_level * structure['indent_size'])
+                    
+                    # Add appropriate closing statement based on language
+                    if language == 'python':
+                        if 'class' in structure['context_map'].get(block_start, {}):
+                            completions.append(f"{indent}    pass")
+                        elif 'function' in structure['context_map'].get(block_start, {}):
+                            completions.append(f"{indent}    return None")
+                        else:
+                            completions.append(f"{indent}    pass")
+            
+            if completions:
+                lines.extend(completions)
+            
+            return '\n'.join(lines)
+        
         result = {}
         
         if action == 'review':
             reviewer = CodeReviewer(ai_client)
             review_result = reviewer.review_code_content(content, file_path)
+            
+            # Enhance issues with context
+            if 'issues' in review_result:
+                enhanced_issues = []
+                for i, issue in enumerate(review_result['issues']):
+                    issue_context = analyze_issue_context(content, issue)
+                    enhanced_issues.append({
+                        'id': i + 1,
+                        'description': issue,
+                        'context': issue_context,
+                        'severity': determine_issue_severity(issue),
+                        'category': categorize_issue(issue)
+                    })
+                review_result['issues'] = enhanced_issues
+            
+            # Enhance suggested changes
+            if 'suggested_changes' in review_result:
+                for i, change in enumerate(review_result['suggested_changes']):
+                    if 'new_content' in change:
+                        # Analyze structure of the new content
+                        structure = analyze_code_structure(change['new_content'], language)
+                        
+                        # Complete any incomplete code blocks
+                        completed_code = complete_code_block(change['new_content'], structure, language)
+                        
+                        # Apply proper indentation
+                        indented_code = apply_proper_indentation(completed_code, structure)
+                        
+                        # Add context information
+                        change.update({
+                            'issue_index': determine_related_issue(change, review_result['issues']),
+                            'change_index': i,
+                            'context': extract_code_context(content, int(change.get('line_number', 1))),
+                            'new_content': indented_code,
+                            'change_type': determine_change_type(change),
+                            'impact': assess_change_impact(change)
+                        })
+            
             result = {
                 'action': 'review',
                 'file_path': file_path,
@@ -274,6 +446,12 @@ def ai_analyze():
         elif action == 'test-generation':
             test_generator = TestGenerator(ai_client)
             test_result = test_generator.generate_tests(content, file_path)
+            
+            if 'test_code' in test_result:
+                structure = analyze_code_structure(test_result['test_code'], language)
+                completed_code = complete_code_block(test_result['test_code'], structure, language)
+                test_result['test_code'] = apply_proper_indentation(completed_code, structure)
+            
             result = {
                 'action': 'test-generation',
                 'file_path': file_path,
@@ -283,8 +461,15 @@ def ai_analyze():
             
         elif action == 'improve':
             reviewer = CodeReviewer(ai_client)
-            # Get code improvement suggestions
             improvement_result = reviewer.review_code_content(content, file_path, review_type="comprehensive")
+            
+            if 'suggested_changes' in improvement_result:
+                for change in improvement_result['suggested_changes']:
+                    if 'new_content' in change:
+                        structure = analyze_code_structure(change['new_content'], language)
+                        completed_code = complete_code_block(change['new_content'], structure, language)
+                        change['new_content'] = apply_proper_indentation(completed_code, structure)
+            
             result = {
                 'action': 'improve',
                 'file_path': file_path,
@@ -299,6 +484,78 @@ def ai_analyze():
     except Exception as e:
         logger.error(f"AI analysis error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+def determine_issue_severity(issue):
+    """Determine the severity level of an issue."""
+    keywords = {
+        'critical': ['critical', 'severe', 'security', 'crash', 'memory leak'],
+        'high': ['error', 'bug', 'incorrect', 'wrong', 'fail'],
+        'medium': ['warning', 'potential', 'might', 'could', 'consider'],
+        'low': ['style', 'formatting', 'documentation', 'suggestion']
+    }
+    
+    issue_lower = issue.lower()
+    for severity, words in keywords.items():
+        if any(word in issue_lower for word in words):
+            return severity
+    return 'medium'
+
+def categorize_issue(issue):
+    """Categorize the type of issue."""
+    categories = {
+        'security': ['security', 'vulnerability', 'injection', 'xss', 'csrf'],
+        'performance': ['performance', 'slow', 'optimization', 'memory', 'cpu'],
+        'reliability': ['error', 'exception', 'crash', 'bug', 'incorrect'],
+        'maintainability': ['duplicate', 'complex', 'readability', 'naming'],
+        'style': ['style', 'formatting', 'whitespace', 'indentation']
+    }
+    
+    issue_lower = issue.lower()
+    for category, keywords in categories.items():
+        if any(keyword in issue_lower for keyword in keywords):
+            return category
+    return 'general'
+
+def determine_change_type(change):
+    """Determine the type of code change."""
+    old_content = change.get('old_content', '')
+    new_content = change.get('new_content', '')
+    
+    if not old_content and new_content:
+        return 'addition'
+    elif old_content and not new_content:
+        return 'deletion'
+    else:
+        return 'modification'
+
+def assess_change_impact(change):
+    """Assess the potential impact of a code change."""
+    impacts = []
+    
+    # Check for function signature changes
+    if 'def ' in change.get('old_content', '') and 'def ' in change.get('new_content', ''):
+        impacts.append('function_signature')
+    
+    # Check for control flow changes
+    if any(keyword in change.get('new_content', '') for keyword in ['if', 'for', 'while', 'try']):
+        impacts.append('control_flow')
+    
+    # Check for error handling changes
+    if any(keyword in change.get('new_content', '') for keyword in ['except', 'raise', 'try']):
+        impacts.append('error_handling')
+    
+    return impacts
+
+def determine_related_issue(change, issues):
+    """Determine which issue this change is related to."""
+    change_content = f"{change.get('old_content', '')} {change.get('new_content', '')}"
+    
+    for i, issue in enumerate(issues):
+        # Look for keywords from the issue description in the change
+        if any(keyword in change_content.lower() for keyword in issue['description'].lower().split()):
+            return i
+    
+    return None
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001) 
