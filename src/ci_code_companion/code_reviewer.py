@@ -5,26 +5,302 @@ This module handles AI-powered code review and analysis.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 from .vertex_ai_client import VertexAIClient
 import json
+import ast
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class CodeSuggestion:
+    """Represents a single code suggestion from the AI model."""
+    issue_description: str
+    line_number: Union[int, str]
+    old_content: str
+    new_content: str
+    explanation: str
+    impact: List[str]
+    severity: str
+    category: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert suggestion to dictionary format."""
+        return {
+            "issue_description": self.issue_description,
+            "line_number": self.line_number,
+            "old_content": self.old_content,
+            "new_content": self.new_content,
+            "explanation": self.explanation,
+            "impact": self.impact,
+            "severity": self.severity,
+            "category": self.category
+        }
 
 class CodeReviewer:
-    """Provides AI-powered code review capabilities."""
+    """Handles code review operations using AI models."""
     
-    def __init__(self, vertex_ai_client: VertexAIClient):
-        """
-        Initialize the code reviewer.
+    def __init__(
+        self,
+        ai_client: VertexAIClient,
+        review_config: Optional[Dict[str, Any]] = None
+    ):
+        """Initialize the code reviewer.
         
         Args:
-            vertex_ai_client: Initialized Vertex AI client
+            ai_client: Instance of VertexAIClient for AI operations
+            review_config: Optional configuration for review behavior
         """
-        self.ai_client = vertex_ai_client
+        self.ai_client = ai_client
+        self.review_config = review_config or self._get_default_config()
         
+    def _get_default_config(self) -> Dict[str, Any]:
+        """Get default configuration for code review."""
+        return {
+            "max_lines_per_review": 500,
+            "min_confidence_score": 0.7,
+            "severity_thresholds": {
+                "critical": 0.9,
+                "high": 0.8,
+                "medium": 0.6,
+                "low": 0.4
+            },
+            "review_aspects": [
+                "security",
+                "performance",
+                "reliability",
+                "maintainability",
+                "best_practices"
+            ]
+        }
+    
+    def _get_review_prompt(self, code: str, file_path: str) -> str:
+        """Generate a concise but effective Python code review prompt."""
+        suggestion_format = '''{
+    "issue_description": "Brief description",
+    "line_number": "Line number",
+    "old_content": "Problematic code",
+    "new_content": "Fixed code with proper indentation and context",
+    "explanation": "Why this is an issue and how the fix helps",
+    "impact": ["List of impacts"],
+    "severity": "critical|high|medium|low",
+    "category": "security|performance|reliability|maintainability|best_practice|bug"
+}'''
+
+        return f"""Review this Python code from {file_path}. For each issue, output a JSON object:
+
+{suggestion_format}
+
+Key requirements:
+- new_content must be complete, properly indented, and include necessary context
+- Include imports if needed
+- Focus on bugs, security, performance, best practices, and style
+- Be thorough but concise
+
+Code to review:
+```python
+{code}
+```"""
+
+    def _build_review_prompt(
+        self,
+        code: str,
+        file_path: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Build the prompt for code review."""
+        # Extract file type and relevant context
+        file_type = Path(file_path).suffix if file_path else ".py"
+        
+        base_prompt = self._get_review_prompt(code, file_path or "unknown.py")
+
+        if context:
+            base_prompt += f"\n\nContext:\n{json.dumps(context, indent=2)}"
+            
+        return base_prompt
+    
+    def _validate_python_syntax(self, code: str) -> List[Dict[str, Any]]:
+        """Validate Python syntax and collect errors.
+        
+        Args:
+            code: Python code to validate
+            
+        Returns:
+            List of syntax errors found
+        """
+        syntax_errors = []
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            syntax_errors.append({
+                "issue_description": "Syntax Error",
+                "line_number": e.lineno,
+                "old_content": e.text.strip() if e.text else "",
+                "new_content": "",  # AI will provide the fix
+                "explanation": str(e),
+                "impact": ["Code will not execute", "Runtime error"],
+                "severity": "critical",
+                "category": "bug"
+            })
+        return syntax_errors
+    
+    def review_code(
+        self,
+        code: str,
+        file_path: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Review code and provide suggestions.
+        
+        Args:
+            code: The code to review
+            file_path: Optional path to the file being reviewed
+            context: Optional additional context
+            
+        Returns:
+            Dictionary containing review results and suggestions
+        """
+        try:
+            # First check for syntax errors
+            syntax_errors = self._validate_python_syntax(code)
+            if syntax_errors:
+                return {
+                    "status": "error",
+                    "issues": syntax_errors,
+                    "message": "Syntax errors found in code"
+                }
+            
+            # Build and send prompt to AI
+            prompt = self._build_review_prompt(code, file_path, context)
+            response = self.ai_client.analyze_code(
+                prompt=prompt,
+                analysis_type="review",
+                context=context
+            )
+            
+            if response["status"] == "error":
+                return response
+            
+            # Process and validate suggestions
+            suggestions = []
+            for issue in response["analysis"]["issues"]:
+                try:
+                    suggestion = CodeSuggestion(**issue)
+                    suggestions.append(suggestion.to_dict())
+                except Exception as e:
+                    logger.warning(f"Invalid suggestion format: {str(e)}")
+                    continue
+            
+            return {
+                "status": "success",
+                "file_path": file_path,
+                "issues": suggestions,
+                "message": f"Found {len(suggestions)} issue(s) to address"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error during code review: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to complete code review: {str(e)}",
+                "issues": []
+            }
+    
+    def apply_suggestion(
+        self,
+        code: str,
+        suggestion: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Apply a suggested code change.
+        
+        Args:
+            code: Original code
+            suggestion: Suggestion to apply
+            
+        Returns:
+            Dictionary with updated code and status
+        """
+        try:
+            lines = code.splitlines()
+            raw_line_num = suggestion["line_number"]
+            start_line_num = -1
+
+            if isinstance(raw_line_num, str) and "-" in raw_line_num:
+                try:
+                    start_str, _ = raw_line_num.split("-", 1)
+                    start_line_num = int(start_str.strip()) - 1  # Use the start of the range, 0-indexed
+                except ValueError:
+                    logger.error(f"Invalid line number range format in suggestion: {raw_line_num}")
+                    return {
+                        "status": "error",
+                        "message": f"Invalid line number format: {raw_line_num}",
+                        "code": code
+                    }
+            elif isinstance(raw_line_num, (int, str)):
+                try:
+                    start_line_num = int(raw_line_num) - 1  # Convert to 0-based index
+                except ValueError:
+                    logger.error(f"Invalid line number string format in suggestion: {raw_line_num}")
+                    return {
+                        "status": "error",
+                        "message": f"Invalid line number format: {raw_line_num}",
+                        "code": code
+                    }
+            else:
+                logger.error(f"Invalid line_number type in suggestion: {type(raw_line_num)}")
+                return {
+                    "status": "error",
+                    "message": f"Invalid line_number type: {type(raw_line_num)}",
+                    "code": code
+                }
+
+            if start_line_num < 0 or start_line_num >= len(lines):
+                return {
+                    "status": "error",
+                    "message": f"Invalid line number: {start_line_num + 1} (original: {raw_line_num})",
+                    "code": code
+                }
+            
+            # Handle multi-line changes
+            old_lines = suggestion["old_content"].splitlines()
+            new_lines = suggestion["new_content"].splitlines()
+            
+            # Remove old lines
+            for _ in range(len(old_lines)):
+                if start_line_num < len(lines):
+                    lines.pop(start_line_num)
+            
+            # Insert new lines
+            for i, new_line in enumerate(new_lines):
+                lines.insert(start_line_num + i, new_line)
+            
+            updated_code = "\n".join(lines)
+            
+            # Validate the updated code
+            try:
+                ast.parse(updated_code)
+                return {
+                    "status": "success",
+                    "message": "Successfully applied suggestion",
+                    "code": updated_code
+                }
+            except SyntaxError as e:
+                return {
+                    "status": "error",
+                    "message": f"Applied change resulted in syntax error: {str(e)}",
+                    "code": code  # Return original code
+                }
+            
+        except Exception as e:
+            logger.error(f"Error applying suggestion: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Failed to apply suggestion: {str(e)}",
+                "code": code
+            }
+    
     def review_code_diff(
         self,
         diff_content: str,
@@ -79,7 +355,7 @@ Additional Context:
     def _comprehensive_review(self, diff_content: str, context_info: str) -> str:
         """Perform comprehensive code review."""
         # Include context info in the prompt
-        prompt = self._get_review_prompt(diff_content, f"diff_content{context_info}")
+        prompt = self._get_review_prompt(diff_content, "unknown.py")
         
         return self.ai_client.analyze_code(prompt, "review")
     
@@ -195,103 +471,166 @@ Please format your response as:
         
         return self.ai_client.analyze_code(diff_content, "performance")
     
-    def _parse_review_response(self, ai_response: str, review_type: str) -> Dict[str, Any]:
+    def _parse_review_response(self, ai_response: Dict[str, Any], review_type: str) -> Dict[str, Any]:
         """
         Parse AI review response into structured format.
-        The AI is expected to return blocks of:
-        ISSUE: [description]
-        LINE: [line_number]
-        OLD: [old_code_line_or_empty]
-        NEW: [new_code_line_or_multiline_block]
-        WHY: [explanation]
-        Separated by blank lines if multiple issues.
-        Or "NO_ISSUES: ..." if no issues.
+        
+        Args:
+            ai_response: Response from the AI model
+            review_type: Type of review performed
+            
+        Returns:
+            Dictionary containing structured review results
         """
         logger.debug(f"Raw AI response to parse:\n{ai_response}")
         result = {
             "review_type": review_type,
             "issues": [],
             "suggested_changes": [],
-            "explanation": "", # General explanation if any, specific WHYs go into issues
+            "explanation": "",
             "severity": "info"
         }
 
-        if ai_response.strip().startswith("NO_ISSUES:"):
-            result["explanation"] = ai_response.strip().split(':', 1)[1].strip()
+        try:
+            # Handle case where ai_response is already a dictionary
+            if isinstance(ai_response, dict):
+                if ai_response.get("status") == "error":
+                    return {
+                        "status": "error",
+                        "error": ai_response.get("error", "Unknown error in AI response"),
+                        "review_type": review_type,
+                        "issues": [],
+                        "suggested_changes": [],
+                        "severity": "error"
+                    }
+                
+                # Extract issues from the analysis section
+                analysis = ai_response.get("analysis", {})
+                if isinstance(analysis, dict) and "issues" in analysis:
+                    for issue in analysis["issues"]:
+                        if not isinstance(issue, dict):
+                            continue
+                            
+                        # Add to issues list
+                        issue_desc = issue.get("issue_description", "")
+                        explanation = issue.get("explanation", "")
+                        if explanation:
+                            issue_desc += f" (Reason: {explanation})"
+                        result["issues"].append(issue_desc)
+                        
+                        # Add to suggested changes
+                        result["suggested_changes"].append({
+                            "line_number": issue.get("line_number"),
+                            "old_content": issue.get("old_content", ""),
+                            "new_content": issue.get("new_content", ""),
+                            "description": issue.get("issue_description", ""),
+                            "explanation": issue.get("explanation", ""),
+                            "severity": issue.get("severity", "medium"),
+                            "category": issue.get("category", "best_practice")
+                        })
+                        
+                        # Update overall severity
+                        if issue.get("severity") == "critical":
+                            result["severity"] = "critical"
+                        elif issue.get("severity") == "high" and result["severity"] not in ["critical"]:
+                            result["severity"] = "high"
+                        elif issue.get("severity") == "medium" and result["severity"] not in ["critical", "high"]:
+                            result["severity"] = "medium"
+                
+                return result
+
+            # If ai_response is a string (legacy format), try to parse it
+            if isinstance(ai_response, str):
+                return self._parse_legacy_response(ai_response, review_type)
+            
+            raise ValueError(f"Unexpected AI response type: {type(ai_response)}")
+            
+        except Exception as e:
+            logger.error(f"Error parsing review response: {str(e)}")
+            return {
+                "status": "error",
+                "error": f"Failed to parse AI response: {str(e)}",
+                "review_type": review_type,
+                "issues": [],
+                "suggested_changes": [],
+                "severity": "error"
+            }
+
+    def _parse_legacy_response(self, response_text: str, review_type: str) -> Dict[str, Any]:
+        """Parse legacy string format response."""
+        result = {
+            "review_type": review_type,
+            "issues": [],
+            "suggested_changes": [],
+            "explanation": "",
+            "severity": "info"
+        }
+
+        if response_text.strip().startswith("NO_ISSUES:"):
+            result["explanation"] = response_text.strip().split(':', 1)[1].strip()
             logger.info("AI reported no issues.")
             return result
 
-        # Split the response into potential blocks of issues based on double newlines or "ISSUE:"
-        # This handles cases where blank lines might be missing but "ISSUE:" starts a new block.
-        blocks = ai_response.strip().split('\n\n') # Split by blank lines first
-        
-        issues_found = []
-        current_issue_block = []
-        
-        # Re-process blocks to handle cases where ISSUE: might not be separated by double newline
-        processed_blocks = []
-        for block_text in blocks:
-            parts = block_text.split("ISSUE:")
-            if parts[0].strip() == "" and len(parts) > 1: # Starts with ISSUE:
-                processed_blocks.append("ISSUE:" + parts[1])
-            elif len(parts) > 1 : # ISSUE: is in the middle of a block
-                if parts[0].strip() != "": processed_blocks.append(parts[0].strip())
-                processed_blocks.append("ISSUE:" + parts[1])
-            else:
-                processed_blocks.append(block_text)
-
-        for block_text in processed_blocks:
-            if not block_text.strip().startswith("ISSUE:"):
+        # Split into blocks and parse each one
+        blocks = response_text.strip().split('\n\n')
+        for block in blocks:
+            if not block.strip().startswith("ISSUE:"):
                 continue
 
-            lines = block_text.strip().split('\n')
-            issue_data = {}
-            
-            # Use a state machine or simply iterate and look for keywords
-            # to make parsing robust to slight variations if AI doesn't strictly follow format.
-            for i, line in enumerate(lines):
-                if line.startswith("ISSUE:"):
-                    issue_data['description'] = line.split(':', 1)[1].strip()
-                elif line.startswith("LINE:"):
-                    try:
-                        issue_data['line_number'] = int(line.split(':', 1)[1].strip())
-                    except ValueError:
-                        logger.warning(f"Could not parse line number from: {line}")
-                        issue_data['line_number'] = None 
-                elif line.startswith("OLD:"):
-                    issue_data['old_content'] = line.split(':', 1)[1].strip()
-                elif line.startswith("NEW:"):
-                    # Handle potential multi-line NEW content
-                    new_content_lines = [line.split(':', 1)[1].strip()]
-                    # Check subsequent lines if they are part of NEW block (not starting with another keyword)
-                    for j in range(i + 1, len(lines)):
-                        if not any(lines[j].startswith(k) for k in ["ISSUE:", "LINE:", "OLD:", "WHY:"]):
-                            new_content_lines.append(lines[j])
-                        else:
-                            break
-                    issue_data['new_content'] = "\n".join(new_content_lines)
-                elif line.startswith("WHY:"):
-                    issue_data['why'] = line.split(':', 1)[1].strip()
-            
-            if issue_data.get('description') and issue_data.get('new_content') is not None and issue_data.get('line_number') is not None:
-                result["issues"].append(issue_data['description'] + (f" (Reason: {issue_data['why']}") if issue_data.get('why') else '')
-                result["suggested_changes"].append({
-                    "line_number": issue_data['line_number'],
-                    "old_content": issue_data.get('old_content', ''), # Default to empty string if not present
-                    "new_content": issue_data['new_content'],
-                    "description": issue_data['description'],
-                    "explanation": issue_data.get('why', '')
-                })
-            elif issue_data: # Log if we parsed something but it was incomplete for a change
-                logger.warning(f"Parsed incomplete issue block: {issue_data} from block: \n{block_text}")
+            try:
+                issue_data = self._parse_issue_block(block.strip())
+                if issue_data:
+                    desc = issue_data['description']
+                    if issue_data.get('why'):
+                        desc += f" (Reason: {issue_data['why']})"
+                    result["issues"].append(desc)
+                    
+                    result["suggested_changes"].append({
+                        "line_number": issue_data.get('line_number'),
+                        "old_content": issue_data.get('old_content', ''),
+                        "new_content": issue_data.get('new_content', ''),
+                        "description": issue_data['description'],
+                        "explanation": issue_data.get('why', ''),
+                        "severity": "medium",  # Default severity for legacy format
+                        "category": "best_practice"  # Default category for legacy format
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to parse issue block: {e}")
 
         if result["issues"]:
-            result["severity"] = "medium" # Default severity if issues are found
-            if any("critical" in issue.lower() or "severe" in issue.lower() or "error" in issue.lower() for issue in result["issues"]):
-                result["severity"] = "high"
-        
-        logger.debug(f"Parsed AI response: {json.dumps(result, indent=2)}")
+            result["severity"] = self._determine_severity(response_text)
+
         return result
+
+    def _parse_issue_block(self, block: str) -> Optional[Dict[str, Any]]:
+        """Parse a single issue block from legacy format."""
+        lines = block.split('\n')
+        issue_data = {}
+        
+        for i, line in enumerate(lines):
+            if line.startswith("ISSUE:"):
+                issue_data['description'] = line.split(':', 1)[1].strip()
+            elif line.startswith("LINE:"):
+                try:
+                    issue_data['line_number'] = int(line.split(':', 1)[1].strip())
+                except ValueError:
+                    issue_data['line_number'] = None
+            elif line.startswith("OLD:"):
+                issue_data['old_content'] = line.split(':', 1)[1].strip()
+            elif line.startswith("NEW:"):
+                new_content_lines = [line.split(':', 1)[1].strip()]
+                for j in range(i + 1, len(lines)):
+                    if not any(lines[j].startswith(k) for k in ["ISSUE:", "LINE:", "OLD:", "WHY:"]):
+                        new_content_lines.append(lines[j])
+                    else:
+                        break
+                issue_data['new_content'] = "\n".join(new_content_lines)
+            elif line.startswith("WHY:"):
+                issue_data['why'] = line.split(':', 1)[1].strip()
+        
+        if issue_data.get('description') and issue_data.get('new_content') is not None:
+            return issue_data
+        return None
     
     def _add_section_content(self, result: Dict, section: str, content: List[str]):
         """Add content to appropriate section of result."""
@@ -523,84 +862,4 @@ Please format your response as:
                 "error": str(e),
                 "recommendations": [],
                 "severity": "unknown"
-            }
-    
-    def _get_review_prompt(self, code, file_path):
-        """Generate a comprehensive code review prompt."""
-        # Define the suggestion format template separately to avoid f-string issues
-        suggestion_format = '''{
-    "issue_description": "Clear description of the issue",
-    "line_number": "Line number where the issue occurs",
-    "old_content": "The exact problematic code with proper indentation",
-    "new_content": "The suggested fix with proper indentation",
-    "explanation": "Detailed explanation of why this is an issue and how the fix helps",
-    "impact": ["List", "of", "impacts"],
-    "severity": "critical|high|medium|low",
-    "category": "security|performance|reliability|maintainability|style"
-}'''
-
-        return f"""Please perform a thorough code review of the following code from {file_path}. 
-    
-Code to review:
-```
-{code}
-```
-
-Analyze the code for the following aspects and provide specific, actionable feedback:
-
-1. Code Quality and Best Practices:
-   - Identify any violations of coding standards or best practices
-   - Check for code readability and maintainability issues
-   - Look for opportunities to improve code organization
-   - Verify proper error handling and logging
-   - Check for proper use of comments and documentation
-
-2. Security Issues:
-   - Identify potential security vulnerabilities
-   - Check for proper input validation
-   - Verify secure handling of sensitive data
-   - Look for authentication/authorization issues
-   - Check for proper use of security-related functions
-
-3. Performance Optimization:
-   - Identify performance bottlenecks
-   - Look for inefficient algorithms or data structures
-   - Check for unnecessary computations or operations
-   - Identify potential memory leaks
-   - Suggest performance improvements
-
-4. Code Structure and Design:
-   - Evaluate class and function organization
-   - Check for proper separation of concerns
-   - Identify violations of SOLID principles
-   - Look for opportunities to improve design patterns
-   - Check for code duplication
-
-5. Bug Detection:
-   - Identify potential runtime errors
-   - Look for edge cases that aren't handled
-   - Check for off-by-one errors
-   - Verify proper null/undefined checks
-   - Identify potential race conditions
-
-For each issue found, please provide:
-1. A clear description of the issue
-2. The exact location (line numbers) where the issue occurs
-3. The problematic code snippet
-4. A detailed explanation of why it's an issue
-5. A specific, properly indented code suggestion to fix the issue
-6. The expected impact of the fix
-
-Format each suggestion exactly as follows:
-{suggestion_format}
-
-Additional requirements:
-1. Maintain the exact same indentation level as the surrounding code
-2. Ensure all code blocks are complete (no partial blocks)
-3. Include necessary imports or dependencies
-4. Consider the context of the entire file
-5. Preserve the existing coding style
-6. Ensure backward compatibility
-7. Follow language-specific best practices
-
-Please be thorough and specific in your review.""" 
+            } 

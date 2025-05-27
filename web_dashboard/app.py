@@ -427,10 +427,22 @@ def ai_analyze():
                         indented_code = apply_proper_indentation(completed_code, structure)
                         
                         # Add context information
+                        raw_line_num_context = change.get('line_number', '1') # Default to 1 if not present
+                        line_for_context = -1
+                        try:
+                            if isinstance(raw_line_num_context, str) and '-' in raw_line_num_context:
+                                start_str, _ = raw_line_num_context.split("-", 1)
+                                line_for_context = int(start_str.strip())
+                            else:
+                                line_for_context = int(raw_line_num_context)
+                        except ValueError:
+                            logger.warning(f"Could not parse line_number '{raw_line_num_context}' for context, defaulting to 1.")
+                            line_for_context = 1
+
                         change.update({
                             'issue_index': determine_related_issue(change, review_result['issues']),
                             'change_index': i,
-                            'context': extract_code_context(content, int(change.get('line_number', 1))),
+                            'context': extract_code_context(content, line_for_context),
                             'new_content': indented_code,
                             'change_type': determine_change_type(change),
                             'impact': assess_change_impact(change)
