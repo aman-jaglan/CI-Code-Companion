@@ -1,0 +1,62 @@
+.diff-viewer-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+    background: #1e1e1e;
+    border-radius: 4px;
+}
+
+.diff-editor {
+    border: 1px solid #333;
+    border-radius: 4px;
+    height: 500px;
+}
+
+.diff-actions {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 0;
+}
+
+.diff-suggestion-info {
+    background: #252525;
+    padding: 1rem;
+    border-radius: 4px;
+}
+
+.impact-list ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+}
+
+.badge {
+    padding: 0.5em 1em;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    margin-right: 0.5rem;
+}
+
+.badge-critical { background: #dc3545; }
+.badge-high { background: #fd7e14; }
+.badge-medium { background: #ffc107; }
+.badge-low { background: #28a745; }
+.badge-info { background: #17a2b8; }
+
+.diff-line-deleted {
+    background: rgba(255, 107, 107, 0.1);
+}
+
+.diff-line-inserted {
+    background: rgba(81, 207, 102, 0.1);
+}
+
+.diff-glyph-deleted::before {
+    content: '-';
+    color: #ff6b6b;
+}
+
+.diff-glyph-inserted::before {
+    content: '+';
+    color: #51cf66;
+} 
