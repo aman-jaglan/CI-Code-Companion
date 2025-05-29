@@ -15,7 +15,11 @@ from google.cloud.aiplatform_v1.services import prediction_service
 from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Value
 from vertexai import init
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from vertexai.generative_models import (
+    GenerativeModel, GenerationConfig,
+    SafetySetting, HarmCategory, HarmBlockThreshold,
+    FinishReason
+)
 import json
 
 logger = logging.getLogger(__name__)
@@ -30,7 +34,7 @@ class VertexAIClient:
         temperature: float = 0.2,
         top_p: float = 0.8,
         top_k: int = 40,
-        max_tokens: int = 8192
+        max_tokens: int = 16384
     ):
         """
         Initialize the Vertex AI client with model parameters.
@@ -77,7 +81,7 @@ class VertexAIClient:
     def generate_code(
         self,
         prompt_text: str,
-        max_output_tokens: int = 1024,
+        max_output_tokens: int = 4096,
         temperature: float = 0.2
     ) -> str:
         """
@@ -96,7 +100,8 @@ class VertexAIClient:
             
             generation_config = GenerationConfig(
                 temperature=temperature,
-                max_output_tokens=max_output_tokens
+                max_output_tokens=max_output_tokens,
+                stop_sequences=self.stop_sequences
             )
             
             # Create a code generation prompt
@@ -122,13 +127,109 @@ Please provide clean, well-documented code with type hints."""
             logger.error(f"Error generating code: {str(e)}")
             raise
 
+    def _get_safety_settings(self) -> List[SafetySetting]:
+        """Get safety settings optimized for code review tasks.
+        
+        Returns:
+            List of safety settings that are permissive for code analysis
+        """
+        return [
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                threshold=HarmBlockThreshold.BLOCK_NONE
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                threshold=HarmBlockThreshold.BLOCK_NONE
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                threshold=HarmBlockThreshold.BLOCK_NONE
+            ),
+            SafetySetting(
+                category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=HarmBlockThreshold.BLOCK_NONE
+            ),
+        ]
+
+    def _calculate_dynamic_tokens(self, prompt: str) -> Dict[str, int]:
+        """Calculate dynamic token limits based on input size and model capacity using real token counts.
+        
+        Args:
+            prompt: The input prompt
+            
+        Returns:
+            Dictionary with calculated token limits
+        """
+        # Hard limits from the model card
+        MAX_INPUT_TOKENS  = 1_048_576          # Gemini 2.5 Pro
+        MAX_OUTPUT_TOKENS = 65_535
+        
+        def dynamic_token_plan(prompt: str,
+                               # Target ~16K tokens for comprehensive analysis of larger files
+                               target_output_for_task: int = 16384, 
+                               soft_context: int = 256_000,  # Increased from 128K to 256K
+                               min_output: int = 1024) -> dict: # Increased min for better quality responses
+            """
+            Returns a dict with:
+              input_tokens, max_output_tokens, needs_chunking, chunk_size_chars
+            """
+            # 1️⃣  Get the real token count – no guessing
+            model = GenerativeModel(self.model_name)
+            input_tokens = model.count_tokens([prompt]).total_tokens
+        
+            # 2️⃣  Pick an output budget with safety buffer
+            remaining   = soft_context - input_tokens      # Space left in our 256 K soft tier
+            
+            # Aim for target_output_for_task, but respect remaining space and absolute MAX_OUTPUT_TOKENS
+            output_tok  = max(min(target_output_for_task,
+                                  remaining,
+                                  MAX_OUTPUT_TOKENS),
+                              min_output)
+            
+            # Add safety buffer - never allocate the full amount
+            # This prevents truncation that makes responses unusable
+            safety_buffer = max(64, output_tok // 20)  # 5% buffer (reduced from 10%), minimum 64 tokens
+            output_tok = max(output_tok - safety_buffer, min_output)
+        
+            # 3️⃣  Decide whether we need chunking
+            # Chunk if input + calculated output exceeds 95% of soft_context (increased from 90%)
+            needs_chunk = input_tokens + output_tok > soft_context * 0.95 
+            if needs_chunk:
+                # Aim to keep each chunk's input ≤ 50% of soft_context allowing room for larger outputs
+                chunk_input_tok  = int(soft_context * 0.5)  # Reduced from 0.6 to 0.5 for larger outputs
+                # crude char approximation (3 char ≈ 1 token)
+                chunk_size_chars = chunk_input_tok * 3
+            else:
+                chunk_size_chars = len(prompt) # No chunking needed, chunk is the whole prompt
+        
+            return {
+                "input_tokens":      input_tokens,
+                "max_output_tokens": output_tok,
+                "needs_chunking":    needs_chunk,
+                "chunk_size_chars":  chunk_size_chars,
+                "total_estimated":   input_tokens + output_tok
+            }
+        
+        # Use the new dynamic token planning
+        result = dynamic_token_plan(prompt)
+        
+        # Convert to the expected format (keeping compatibility)
+        return {
+            "estimated_input_tokens": result["input_tokens"],
+            "max_output_tokens": result["max_output_tokens"],
+            "needs_chunking": result["needs_chunking"],
+            "chunk_size_chars": result["chunk_size_chars"],
+            "total_estimated": result["total_estimated"]
+        }
+
     def analyze_code(
         self,
         prompt: str,
         analysis_type: str,
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Analyze code using the Vertex AI model.
+        """Analyze code using the Vertex AI model with dynamic token management.
         
         Args:
             prompt: The formatted prompt containing code and instructions
@@ -139,75 +240,96 @@ Please provide clean, well-documented code with type hints."""
             Dictionary containing the analysis results
         """
         try:
-            # Use Gemini model for code analysis
+            # Calculate dynamic token limits
+            token_config = self._calculate_dynamic_tokens(prompt)
+            
+            logger.info(f"Dynamic token analysis: {token_config}")
+            
+            # Use chunking only if needed
+            if token_config["needs_chunking"]:
+                logger.info(f"Large input detected ({token_config['estimated_input_tokens']} tokens). Using dynamic chunked analysis.")
+                return self._analyze_large_input_dynamic(prompt, analysis_type, context, token_config)
+            
+            # Use the full prompt with dynamic output limit
             model = GenerativeModel(self.model_name)
             
-            # Estimate token count (rough estimate: 4 chars = 1 token)
-            estimated_tokens = len(prompt) // 4
-            
-            # If we expect the total tokens (input + output) to exceed 20k, use chunking
-            if estimated_tokens > 10000:  # Increased threshold since Gemini can handle larger contexts
-                logger.info(f"Large input detected ({estimated_tokens} estimated tokens). Using chunked analysis.")
-                return self._analyze_large_input(prompt, analysis_type, context)
-            
             generation_config = GenerationConfig(
-                temperature=0.1,  # Lower temperature for more focused, precise responses
-                max_output_tokens=16384,  # Increased to better utilize Gemini's capacity
-                top_p=0.9,  # Higher top_p for better quality while maintaining determinism
-                top_k=20,  # Lower top_k for more focused responses
-                candidate_count=1,
-                stop_sequences=["```\n\nLet me", "```\n\n**", "```\n\nNow"]  # Stop before explanations
+                temperature=0.1,
+                max_output_tokens=token_config["max_output_tokens"],
+                stop_sequences=self.stop_sequences
             )
+            
+            # Get safety settings to prevent blocking of code review content
+            safety_settings = self._get_safety_settings()
             
             response = model.generate_content(
                 prompt,
                 generation_config=generation_config,
+                safety_settings=safety_settings,
                 stream=False
             )
             
-            # Check for MAX_TOKENS error
+            # Check for MAX_TOKENS error and adapt
             if (hasattr(response, 'candidates') and response.candidates and
                 hasattr(response.candidates[0], 'finish_reason') and
-                response.candidates[0].finish_reason == "MAX_TOKENS"):
-                logger.warning(f"Response truncated due to MAX_TOKENS. Using chunked analysis...")
-                return self._analyze_large_input(prompt, analysis_type, context)
+                response.candidates[0].finish_reason is FinishReason.MAX_TOKENS):
+                logger.warning(f"Hit MAX_TOKENS with {token_config['max_output_tokens']} limit ({response.usage_metadata.total_token_count - response.usage_metadata.prompt_token_count} tokens generated). Switching to chunked analysis as a fallback...")
+                # Force chunking by creating a token_config that ensures it
+                # We use a small chunk size here because the single prompt failed.
+                forced_chunk_config = token_config.copy()
+                forced_chunk_config['needs_chunking'] = True 
+                # Make chunk_size_chars smaller to ensure multiple chunks if possible, e.g., 50% of soft_context for input tokens per chunk
+                # but we need to calculate a character count from this. Soft context is 256k.
+                # Let target_chunk_input_tokens be 50% of 256k, then convert to chars.
+                target_chunk_input_tokens = int(256000 * 0.5) # 256k * 0.5 = 128000 tokens
+                forced_chunk_config['chunk_size_chars'] = target_chunk_input_tokens * 3 # Approx 384k chars
+
+                # However, if the original prompt is smaller than this, just use a fraction of it.
+                if len(prompt) < forced_chunk_config['chunk_size_chars']:
+                     forced_chunk_config['chunk_size_chars'] = len(prompt) // 2 if len(prompt) // 2 > 100 else len(prompt)
+
+                logger.info(f"Forcing chunked analysis with config: {forced_chunk_config}")
+                return self._analyze_large_input_dynamic(prompt, analysis_type, context, forced_chunk_config)
             
-            # Extract text from response, handling all possible response formats
+            # Extract and validate response
             response_text = self._extract_response_text(response)
             
             if not response_text:
                 raise ValueError("No valid text in model response")
                 
-            # Validate and parse the response
             parsed_response = self._parse_and_validate_response(response_text, analysis_type)
-            
             return parsed_response
             
         except Exception as e:
-            logger.error(f"Error during code analysis: {str(e)}")
+            logger.error(f"Error during dynamic code analysis: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e),
                 "analysis": None
             }
 
-    def _analyze_large_input(
+    def _analyze_large_input_dynamic(
         self,
         prompt: str,
         analysis_type: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        token_config: Optional[Dict[str, int]] = None
     ) -> Dict[str, Any]:
-        """Handle analysis of large inputs by splitting them into chunks.
+        """Handle analysis of large inputs using dynamic chunking.
         
         Args:
             prompt: The large prompt to analyze
             analysis_type: Type of analysis
             context: Additional context
+            token_config: Pre-calculated token configuration
             
         Returns:
             Combined analysis results
         """
         try:
+            if not token_config:
+                token_config = self._calculate_dynamic_tokens(prompt)
+            
             # Extract the code block from the prompt
             code_start = prompt.find("```")
             code_end = prompt.rfind("```")
@@ -219,58 +341,161 @@ Please provide clean, well-documented code with type hints."""
             code = prompt[code_start+3:code_end].strip()
             footer = prompt[code_end+3:].strip()
             
-            # Split code into larger chunks since Gemini can handle it
-            chunk_size = 24000  # Increased chunk size
+            # Use dynamic chunk size
+            chunk_size = token_config["chunk_size_chars"]
             code_chunks = [code[i:i + chunk_size] 
                          for i in range(0, len(code), chunk_size)]
             
-            logger.info(f"Split code into {len(code_chunks)} chunks for analysis")
+            logger.info(f"Dynamic chunking: {len(code_chunks)} chunks with {chunk_size} chars each")
             
             all_issues = []
+            successful_chunks = 0
+            
             for i, chunk in enumerate(code_chunks):
-                chunk_prompt = f"{header}\n```\n{chunk}\n```\n{footer}"
-                chunk_prompt += f"\nAnalyzing part {i + 1} of {len(code_chunks)}."
+                # Calculate dynamic tokens for this specific chunk
+                chunk_prompt = f"""You are an expert code reviewer analyzing a code chunk ({i + 1}/{len(code_chunks)}). Use systematic analysis to identify the most critical issues.
+
+**FOCUSED ANALYSIS PROCESS:**
+
+1. **CHUNK CONTEXT**: Understand this code segment:
+   - What is the primary purpose of this code?
+   - What patterns and structures are present?
+   - How does this likely fit into the larger system?
+
+2. **CRITICAL ISSUE DETECTION**: Look for high-impact problems:
+   - Security vulnerabilities (injection, validation bypass, exposure)
+   - Logic errors that cause incorrect behavior
+   - Performance bottlenecks (inefficient algorithms, resource leaks)
+   - Reliability issues (error handling, edge cases)
+
+3. **QUALITY ASSESSMENT**: Evaluate code quality:
+   - Maintainability and readability
+   - Adherence to best practices
+   - Proper error handling
+   - Code organization and structure
+
+**ANALYSIS FOCUS:**
+Since this is a chunk analysis, prioritize:
+- Issues that have immediate impact on correctness or security
+- Problems that affect system stability
+- Clear optimization opportunities
+- Maintainability improvements that reduce technical debt
+
+**CHUNK ANALYSIS:**
+
+<thinking>
+Let me analyze this code chunk systematically:
+
+1. CHUNK CONTEXT:
+[Understanding the code's purpose and structure]
+
+2. CRITICAL ISSUE DETECTION:
+[Identifying high-impact problems]
+
+3. QUALITY ASSESSMENT:
+[Evaluating code quality and best practices]
+</thinking>
+
+**CODE CHUNK ({i + 1}/{len(code_chunks)}):**
+```python
+{chunk}
+```
+
+**IDENTIFIED ISSUES:**
+Based on my analysis, here are the most critical issues found (up to 3, prioritized by impact).
+
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core problem and solution.
+
+**STRICT JSON FORMAT REQUIREMENT:**
+You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
+Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+
+**JSON FORMAT:**
+{{"issue_description":"Clear description","line_number":"X","old_content":"current code","new_content":"fixed code","explanation":"Brief reason (1-2 sentences max)","impact":["benefit1","benefit2"],"severity":"critical|high|medium|low","category":"security|bug|performance|maintainability|style"}}
+
+Each issue must be a separate JSON object on its own line.
+
+```json"""
+                
+                # Calculate dynamic output for this chunk
+                chunk_token_config = self._calculate_dynamic_tokens(chunk_prompt)
                 
                 model = GenerativeModel(self.model_name)
                 generation_config = GenerationConfig(
-                    temperature=self.temperature,
-                    max_output_tokens=16384,  # Increased to match analyze_code
-                    top_p=self.top_p,
-                    top_k=self.top_k
+                    temperature=0.1,
+                    max_output_tokens=chunk_token_config["max_output_tokens"],
+                    stop_sequences=self.stop_sequences
                 )
                 
-                response = model.generate_content(
-                    chunk_prompt,
-                    generation_config=generation_config,
-                    stream=False
-                )
+                # Get safety settings to prevent blocking
+                safety_settings = self._get_safety_settings()
                 
-                response_text = self._extract_response_text(response)
-                if response_text:
-                    chunk_result = self._parse_and_validate_response(
-                        response_text, 
-                        analysis_type
+                try:
+                    response = model.generate_content(
+                        chunk_prompt,
+                        generation_config=generation_config,
+                        safety_settings=safety_settings,
+                        stream=False
                     )
-                    if chunk_result.get("status") == "success":
-                        all_issues.extend(
-                            chunk_result.get("analysis", {}).get("issues", [])
+                    
+                    # Handle MAX_TOKENS by reducing output for this chunk
+                    if (hasattr(response, 'candidates') and response.candidates and
+                        hasattr(response.candidates[0], 'finish_reason') and
+                        response.candidates[0].finish_reason is FinishReason.MAX_TOKENS):
+                        
+                        logger.warning(f"Chunk {i+1} hit MAX_TOKENS, retrying with smaller output...")
+                        
+                        # Retry with smaller output
+                        smaller_config = GenerationConfig(
+                            temperature=0.1,
+                            max_output_tokens=max(1024, chunk_token_config["max_output_tokens"] // 2),  # Increased from 256 to 1024
+                            stop_sequences=self.stop_sequences
                         )
-                else:
-                    logger.warning(f"No valid response for chunk {i + 1}")
+                        
+                        response = model.generate_content(
+                            chunk_prompt,
+                            generation_config=smaller_config,
+                            safety_settings=safety_settings,
+                            stream=False
+                        )
+                    
+                    response_text = self._extract_response_text(response)
+                    if response_text:
+                        chunk_result = self._parse_and_validate_response(
+                            response_text, 
+                            analysis_type
+                        )
+                        if chunk_result.get("status") == "success":
+                            chunk_issues = chunk_result.get("analysis", {}).get("issues", [])
+                            all_issues.extend(chunk_issues)
+                            successful_chunks += 1
+                            logger.info(f"Chunk {i+1} processed successfully: {len(chunk_issues)} issues found")
+                        else:
+                            logger.warning(f"Chunk {i+1} failed validation")
+                    else:
+                        logger.warning(f"No valid response for chunk {i + 1}")
+                        
+                except Exception as chunk_error:
+                    logger.error(f"Error processing chunk {i+1}: {str(chunk_error)}")
+                    continue
             
-            if not all_issues:
+            if not all_issues and successful_chunks == 0:
                 raise ValueError("No valid results from any chunk")
+            
+            logger.info(f"Dynamic chunking completed: {successful_chunks}/{len(code_chunks)} chunks successful, {len(all_issues)} total issues found")
             
             return {
                 "status": "success",
                 "analysis": {
                     "type": analysis_type,
-                    "issues": all_issues
+                    "issues": all_issues,
+                    "chunks_processed": successful_chunks,
+                    "total_chunks": len(code_chunks)
                 }
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing large input: {str(e)}")
+            logger.error(f"Error in dynamic large input analysis: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e),
@@ -293,29 +518,36 @@ Please provide clean, well-documented code with type hints."""
             
             # If no direct text, try to extract from candidates
             if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                
-                # Check for MAX_TOKENS error
-                if (hasattr(candidate, 'finish_reason') and 
-                    candidate.finish_reason == "MAX_TOKENS"):
-                    logger.warning("Response truncated due to MAX_TOKENS")
-                
-                # Try to get text from content
-                if hasattr(candidate, 'content'):
-                    content = candidate.content
+                # Iterate through all candidates to find one with valid content
+                for candidate_idx, candidate in enumerate(response.candidates):
                     
-                    # Check for text in parts
-                    if hasattr(content, 'parts') and content.parts:
-                        part = content.parts[0]
+                    # Check for MAX_TOKENS error (but still try to extract text)
+                    if (hasattr(candidate, 'finish_reason') and 
+                        candidate.finish_reason is FinishReason.MAX_TOKENS):
+                        logger.warning(f"Candidate {candidate_idx} truncated due to MAX_TOKENS")
+                    
+                    # Try to get text from content
+                    if hasattr(candidate, 'content'):
+                        content = candidate.content
                         
-                        # Handle different part formats
-                        if isinstance(part, str):
-                            return part
-                        elif isinstance(part, dict) and 'text' in part:
-                            return part['text']
-                        elif hasattr(part, 'text'):
-                            return part.text
+                        # Check for text in parts
+                        if hasattr(content, 'parts') and content.parts:
+                            part = content.parts[0]
+                            
+                            # Handle different part formats
+                            if isinstance(part, str):
+                                logger.info(f"Found valid text in candidate {candidate_idx}")
+                                return part
+                            elif isinstance(part, dict) and 'text' in part:
+                                logger.info(f"Found valid text in candidate {candidate_idx}")
+                                return part['text']
+                            elif hasattr(part, 'text'):
+                                logger.info(f"Found valid text in candidate {candidate_idx}")
+                                return part.text
+                        else:
+                            logger.warning(f"Candidate {candidate_idx} has empty parts (likely safety-filtered)")
             
+            logger.warning("No valid text found in any candidate")
             return None
             
         except Exception as e:
@@ -416,33 +648,183 @@ Please provide clean, well-documented code with type hints."""
             }
 
     def _extract_json_objects(self, text: str) -> List[Dict[str, Any]]:
-        """Extract JSON objects from the response text, expecting them to be in ```json ... ``` blocks.
+        """Extract JSON objects from the response text, supporting both ```json blocks and individual JSON objects.
         
         Args:
-            text: Response text potentially containing JSON objects in markdown code blocks.
+            text: Response text potentially containing JSON objects in various formats.
             
         Returns:
             List of parsed JSON objects
         """
-        # Regex to find JSON objects within ```json ... ``` blocks
-        # It captures the content between the ```json and ``` markers.
-        # re.DOTALL allows . to match newlines, important for multi-line JSON.
-        json_block_pattern = re.compile(r'```json\s*([\s\S]*?)\s*```')
-        
         json_objects = []
+        
+        # First, try to find JSON objects within ```json ... ``` blocks
+        json_block_pattern = re.compile(r'```json\s*([\s\S]*?)\s*```', re.DOTALL)
+        
         for match in json_block_pattern.finditer(text):
-            json_str = match.group(1).strip() # Get the content and strip whitespace
+            json_content = match.group(1).strip()
+            
+            # Try to parse as a single JSON object first
             try:
-                json_obj = json.loads(json_str)
-                json_objects.append(json_obj)
-                logger.debug(f"_extract_json_objects: Successfully parsed JSON object: {json_str}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"_extract_json_objects: Failed to parse JSON string from block: '{json_str}'. Error: {e}")
+                json_obj = json.loads(json_content)
+                
+                # Check if it's a list (array) of objects
+                if isinstance(json_obj, list):
+                    for item in json_obj:
+                        if isinstance(item, dict):
+                            # Convert wrong format to expected format if needed
+                            converted_item = self._convert_wrong_format_to_expected(item)
+                            if converted_item:
+                                json_objects.append(converted_item)
+                            else:
+                                json_objects.append(item)
+                else:
+                    # Single object
+                    converted_obj = self._convert_wrong_format_to_expected(json_obj)
+                    if converted_obj:
+                        json_objects.append(converted_obj)
+                    else:
+                        json_objects.append(json_obj)
+                
+                logger.debug(f"_extract_json_objects: Successfully parsed JSON object from block: {json_content}")
+                continue
+            except json.JSONDecodeError:
+                pass
+            
+            # If single JSON parsing failed, try to parse multiple JSON objects separated by newlines
+            for line in json_content.split('\n'):
+                line = line.strip()
+                if line and (line.startswith('{') or line.startswith('[')):
+                    try:
+                        json_obj = json.loads(line)
+                        converted_obj = self._convert_wrong_format_to_expected(json_obj)
+                        if converted_obj:
+                            json_objects.append(converted_obj)
+                        else:
+                            json_objects.append(json_obj)
+                        logger.debug(f"_extract_json_objects: Successfully parsed JSON object from line: {line}")
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"_extract_json_objects: Failed to parse JSON line: '{line}'. Error: {e}")
+        
+        # If no JSON blocks found, try to find individual JSON objects in the text
+        if not json_objects:
+            logger.debug("_extract_json_objects: No JSON blocks found, searching for individual JSON objects")
+            
+            # Look for lines that start with { and try to parse them as JSON
+            for line in text.split('\n'):
+                line = line.strip()
+                if line.startswith('{') and line.endswith('}'):
+                    try:
+                        json_obj = json.loads(line)
+                        converted_obj = self._convert_wrong_format_to_expected(json_obj)
+                        if converted_obj:
+                            json_objects.append(converted_obj)
+                        else:
+                            json_objects.append(json_obj)
+                        logger.debug(f"_extract_json_objects: Successfully parsed standalone JSON object: {line}")
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"_extract_json_objects: Failed to parse standalone JSON: '{line}'. Error: {e}")
+            
+            # Try to find JSON objects using a more flexible regex pattern
+            if not json_objects:
+                # Look for JSON-like structures with curly braces
+                json_pattern = re.compile(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}')
+                
+                for match in json_pattern.finditer(text):
+                    potential_json = match.group(0).strip()
+                    try:
+                        json_obj = json.loads(potential_json)
+                        converted_obj = self._convert_wrong_format_to_expected(json_obj)
+                        if converted_obj:
+                            json_objects.append(converted_obj)
+                        else:
+                            json_objects.append(json_obj)
+                        logger.debug(f"_extract_json_objects: Successfully parsed JSON object with regex: {potential_json}")
+                    except json.JSONDecodeError:
+                        continue
         
         if not json_objects:
-            logger.warning(f"_extract_json_objects: No JSON objects found in ```json ... ``` blocks. Full text: {text}")
+            logger.warning(f"_extract_json_objects: No valid JSON objects found in text. Full text: {text}")
+        else:
+            logger.info(f"_extract_json_objects: Successfully extracted {len(json_objects)} JSON objects")
             
         return json_objects
+
+    def _convert_wrong_format_to_expected(self, json_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert AI's wrong JSON format to the expected format.
+        
+        Args:
+            json_obj: JSON object that might be in wrong format
+            
+        Returns:
+            Converted object in expected format, or None if no conversion needed
+        """
+        # Check if this looks like the wrong format (has fields like 'file', 'title', 'description', 'suggestion')
+        wrong_format_fields = ['file', 'title', 'description', 'suggestion', 'line_start', 'line_end']
+        has_wrong_fields = any(field in json_obj for field in wrong_format_fields)
+        
+        # Check if it already has the expected format
+        expected_fields = ['issue_description', 'line_number', 'old_content', 'new_content', 'explanation', 'impact', 'severity', 'category']
+        has_expected_fields = any(field in json_obj for field in expected_fields)
+        
+        if has_wrong_fields and not has_expected_fields:
+            logger.info("_convert_wrong_format_to_expected: Converting AI's wrong format to expected format")
+            
+            # Convert the wrong format to expected format
+            converted = {}
+            
+            # Map fields
+            converted['issue_description'] = json_obj.get('title', json_obj.get('description', 'Unknown issue'))
+            
+            # Handle line numbers
+            if 'line_start' in json_obj and 'line_end' in json_obj:
+                line_start = json_obj['line_start']
+                line_end = json_obj['line_end']
+                if line_start == line_end:
+                    converted['line_number'] = str(line_start)
+                else:
+                    converted['line_number'] = f"{line_start}-{line_end}"
+            elif 'line_start' in json_obj:
+                converted['line_number'] = str(json_obj['line_start'])
+            else:
+                converted['line_number'] = "1"  # Default
+            
+            # Extract old content (this might be tricky to auto-generate)
+            converted['old_content'] = "# Code needs review"  # Placeholder
+            
+            # Use suggestion as new content
+            converted['new_content'] = json_obj.get('suggestion', 'See suggestion for improvement')
+            
+            # Use description as explanation
+            converted['explanation'] = json_obj.get('description', 'See issue description')
+            
+            # Create impact based on severity and description
+            severity = json_obj.get('severity', 'medium').lower()
+            if 'critical' in severity:
+                converted['impact'] = ['Fixes critical issue', 'Prevents system failure']
+            elif 'high' in severity:
+                converted['impact'] = ['Improves code quality', 'Reduces bugs']
+            else:
+                converted['impact'] = ['Code improvement', 'Better maintainability']
+            
+            # Map severity
+            converted['severity'] = severity if severity in ['critical', 'high', 'medium', 'low'] else 'medium'
+            
+            # Infer category based on content
+            description_lower = json_obj.get('description', '').lower()
+            if any(keyword in description_lower for keyword in ['security', 'injection', 'vulnerability', 'attack']):
+                converted['category'] = 'security'
+            elif any(keyword in description_lower for keyword in ['performance', 'slow', 'efficient', 'optimization']):
+                converted['category'] = 'performance'
+            elif any(keyword in description_lower for keyword in ['bug', 'error', 'exception', 'crash']):
+                converted['category'] = 'bug'
+            else:
+                converted['category'] = 'maintainability'
+            
+            logger.debug(f"_convert_wrong_format_to_expected: Converted {json_obj} to {converted}")
+            return converted
+        
+        return None  # No conversion needed
 
     def _calculate_content_similarity(self, content1: str, content2: str) -> float:
         """Calculate similarity between two code content strings.
