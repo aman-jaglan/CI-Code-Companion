@@ -151,11 +151,12 @@ Please provide clean, well-documented code with type hints."""
                 return self._analyze_large_input(prompt, analysis_type, context)
             
             generation_config = GenerationConfig(
-                temperature=self.temperature,
+                temperature=0.1,  # Lower temperature for more focused, precise responses
                 max_output_tokens=16384,  # Increased to better utilize Gemini's capacity
-                top_p=self.top_p,
-                top_k=self.top_k,
-                candidate_count=1
+                top_p=0.9,  # Higher top_p for better quality while maintaining determinism
+                top_k=20,  # Lower top_k for more focused responses
+                candidate_count=1,
+                stop_sequences=["```\n\nLet me", "```\n\n**", "```\n\nNow"]  # Stop before explanations
             )
             
             response = model.generate_content(
@@ -352,18 +353,52 @@ Please provide clean, well-documented code with type hints."""
             logger.info(f"_parse_and_validate_response: Extracted {len(json_objects)} JSON object(s).")
             # Validate each suggestion
             validated_suggestions = []
+            seen_issues = set()  # Track unique issues to prevent duplicates
+            
             for i, suggestion in enumerate(json_objects):
                 logger.debug(f"_parse_and_validate_response: Validating suggestion #{i+1}: {suggestion}")
+                
                 if self._validate_suggestion_format(suggestion):
-                    validated_suggestions.append(suggestion)
+                    # Create a unique identifier for this issue to check for duplicates
+                    issue_key = (
+                        suggestion.get("line_number", ""),
+                        suggestion.get("issue_description", "").lower().strip(),
+                        suggestion.get("category", "")
+                    )
+                    
+                    # Check for duplicate issues
+                    if issue_key in seen_issues:
+                        logger.warning(f"_parse_and_validate_response: Duplicate issue detected, skipping suggestion #{i+1}: {suggestion}")
+                        continue
+                    
+                    # Check for similar solutions (comparing new_content)
+                    new_content = suggestion.get("new_content", "").strip()
+                    is_duplicate_solution = False
+                    
+                    for existing_suggestion in validated_suggestions:
+                        existing_content = existing_suggestion.get("new_content", "").strip()
+                        
+                        # Simple similarity check - if solutions are very similar, it's likely a duplicate
+                        if len(new_content) > 10 and len(existing_content) > 10:
+                            similarity = self._calculate_content_similarity(new_content, existing_content)
+                            if similarity > 0.85:  # 85% similarity threshold
+                                logger.warning(f"_parse_and_validate_response: Similar solution detected (similarity: {similarity:.2f}), skipping suggestion #{i+1}")
+                                is_duplicate_solution = True
+                                break
+                    
+                    if not is_duplicate_solution:
+                        seen_issues.add(issue_key)
+                        validated_suggestions.append(suggestion)
+                        logger.debug(f"_parse_and_validate_response: Added unique suggestion #{i+1}")
+                    
                 else:
                     logger.warning(f"_parse_and_validate_response: Suggestion #{i+1} failed validation: {suggestion}")
-            
+
             if not validated_suggestions:
                 logger.warning("_parse_and_validate_response: No suggestions passed validation.")
                 raise ValueError("No valid suggestions after validation")
             
-            logger.info(f"_parse_and_validate_response: {len(validated_suggestions)} suggestions passed validation.")
+            logger.info(f"_parse_and_validate_response: {len(validated_suggestions)} unique suggestions passed validation.")
             return {
                 "status": "success",
                 "analysis": {
@@ -408,6 +443,42 @@ Please provide clean, well-documented code with type hints."""
             logger.warning(f"_extract_json_objects: No JSON objects found in ```json ... ``` blocks. Full text: {text}")
             
         return json_objects
+
+    def _calculate_content_similarity(self, content1: str, content2: str) -> float:
+        """Calculate similarity between two code content strings.
+        
+        Args:
+            content1: First content string
+            content2: Second content string
+            
+        Returns:
+            Similarity score between 0.0 and 1.0
+        """
+        try:
+            # Normalize the content (remove extra whitespace, convert to lowercase)
+            normalized1 = ' '.join(content1.lower().split())
+            normalized2 = ' '.join(content2.lower().split())
+            
+            if not normalized1 or not normalized2:
+                return 0.0
+            
+            # Simple character-based similarity using set intersection
+            set1 = set(normalized1)
+            set2 = set(normalized2)
+            
+            if not set1 and not set2:
+                return 1.0
+            if not set1 or not set2:
+                return 0.0
+            
+            intersection = len(set1.intersection(set2))
+            union = len(set1.union(set2))
+            
+            return intersection / union if union > 0 else 0.0
+            
+        except Exception as e:
+            logger.warning(f"Error calculating content similarity: {str(e)}")
+            return 0.0
 
     def _validate_suggestion_format(self, suggestion: Dict[str, Any]) -> bool:
         """Validate that a suggestion has all required fields and correct format.
@@ -475,6 +546,18 @@ Please provide clean, well-documented code with type hints."""
                             logger.warning(f"_validate_suggestion_format: Invalid type for field '{field}'. Expected {expected_type}, got {type(current_value)}. Suggestion: {suggestion}")
                             return False
             
+            # Enhanced validation for content quality
+            
+            # Validate issue description is meaningful
+            if len(suggestion["issue_description"].strip()) < 10:
+                logger.warning(f"_validate_suggestion_format: Issue description too short: {suggestion}")
+                return False
+            
+            # Validate explanation is meaningful
+            if len(suggestion["explanation"].strip()) < 15:
+                logger.warning(f"_validate_suggestion_format: Explanation too short: {suggestion}")
+                return False
+            
             # Validate severity
             if suggestion["severity"] not in ["critical", "high", "medium", "low"]:
                 logger.warning(f"_validate_suggestion_format: Invalid severity level '{suggestion['severity']}' in suggestion: {suggestion}")
@@ -489,17 +572,50 @@ Please provide clean, well-documented code with type hints."""
                 logger.warning(f"_validate_suggestion_format: Invalid category '{suggestion['category']}' in suggestion: {suggestion}")
                 return False
             
-            # Validate impact list is not empty
-            if not suggestion["impact"]:
+            # Validate impact list is not empty and contains meaningful content
+            if not suggestion["impact"] or len(suggestion["impact"]) == 0:
                 logger.warning(f"_validate_suggestion_format: Empty impact list in suggestion: {suggestion}")
                 return False
             
-            # Validate code content
-            if not suggestion["old_content"].strip() or not suggestion["new_content"].strip():
+            for impact_item in suggestion["impact"]:
+                if not isinstance(impact_item, str) or len(impact_item.strip()) < 3:
+                    logger.warning(f"_validate_suggestion_format: Invalid impact item '{impact_item}' in suggestion: {suggestion}")
+                    return False
+            
+            # Validate code content is substantial
+            old_content = suggestion["old_content"].strip()
+            new_content = suggestion["new_content"].strip()
+            
+            if not old_content or not new_content:
                 logger.warning(f"_validate_suggestion_format: Empty code content in suggestion: {suggestion}")
                 return False
             
-            logger.debug(f"_validate_suggestion_format: Suggestion passed validation: {suggestion}")
+            # Check that new_content is different from old_content (unless it's a style fix)
+            if old_content == new_content and suggestion["category"] not in ["style", "best_practice"]:
+                logger.warning(f"_validate_suggestion_format: Identical old and new content for non-style issue: {suggestion}")
+                return False
+            
+            # Basic Python syntax validation for new_content (if it looks like Python code)
+            if suggestion["category"] in ["bug", "security", "performance", "reliability"]:
+                try:
+                    # Try to parse the new_content as Python (if it contains Python-like syntax)
+                    if any(keyword in new_content for keyword in ["def ", "class ", "import ", "from ", "if ", "for ", "while "]):
+                        import ast
+                        # Wrap in a function if it's just a code snippet
+                        test_code = new_content
+                        if not (test_code.strip().startswith(("def ", "class ", "import ", "from "))):
+                            test_code = f"def temp_func():\n    {new_content.replace(chr(10), chr(10) + '    ')}"
+                        
+                        try:
+                            ast.parse(test_code)
+                        except SyntaxError as e:
+                            logger.warning(f"_validate_suggestion_format: New content has syntax errors: {e}. Content: {new_content}")
+                            return False
+                except Exception:
+                    # If we can't validate syntax, that's okay - continue
+                    pass
+            
+            logger.debug(f"_validate_suggestion_format: Suggestion passed enhanced validation: {suggestion}")
             return True
             
         except Exception as e:
