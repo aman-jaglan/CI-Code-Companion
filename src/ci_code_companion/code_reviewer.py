@@ -77,32 +77,73 @@ class CodeReviewer:
         }
     
     def _get_review_prompt(self, code: str, file_path: str) -> str:
-        """Generate a concise but effective Python code review prompt."""
-        suggestion_format = '''{
-    "issue_description": "Brief description",
-    "line_number": "Line number",
-    "old_content": "Problematic code",
-    "new_content": "Fixed code with proper indentation and context",
-    "explanation": "Why this is an issue and how the fix helps",
-    "impact": ["List of impacts"],
+        """Generate an advanced Chain of Thought code review prompt."""
+        
+        return f"""You are an expert Python code reviewer. Use systematic thinking to analyze the code thoroughly.
+
+**ANALYSIS FRAMEWORK - Think Step by Step:**
+
+1. **FIRST PASS - Syntax & Structure Analysis:**
+   - Check for syntax errors, imports, and basic structure
+   - Identify potential runtime errors or logical flaws
+   - Note any missing imports or dependencies
+
+2. **SECOND PASS - Security & Performance Review:**
+   - Look for security vulnerabilities (injection, exposure, etc.)
+   - Identify performance bottlenecks or inefficient patterns
+   - Check for resource management issues
+
+3. **THIRD PASS - Best Practices & Maintainability:**
+   - Evaluate code style, naming conventions, and readability
+   - Check for code duplication, magic numbers, or anti-patterns
+   - Assess error handling and edge case coverage
+
+**SOLUTION REQUIREMENTS:**
+- Provide EXACTLY ONE optimal solution per issue identified
+- Solutions must be syntactically correct and fully functional
+- Include ALL necessary imports and context in the solution
+- Ensure proper indentation and Python best practices
+- Test your solution mentally before providing it
+
+**OUTPUT FORMAT:**
+For each issue found, provide a single JSON object:
+
+```json
+{{
+    "issue_description": "Concise description of the specific problem",
+    "line_number": "Exact line number or range (e.g., '15' or '10-12')",
+    "old_content": "The problematic code exactly as it appears",
+    "new_content": "Complete, corrected code that is production-ready",
+    "explanation": "Brief explanation of why this change fixes the issue",
+    "impact": ["List of specific improvements this solution provides"],
     "severity": "critical|high|medium|low",
     "category": "security|performance|reliability|maintainability|best_practice|bug"
-}'''
+}}
+```
 
-        return f"""Review this Python code from {file_path}. For each issue, output a JSON object:
+**CRITICAL CONSTRAINTS:**
+- NO repetitive or redundant solutions
+- Each solution must be self-contained and complete
+- Solutions must pass Python syntax validation
+- Include proper type hints where beneficial
+- Maintain existing functionality while fixing issues
 
-{suggestion_format}
+**FILE TO ANALYZE:** {file_path}
 
-Key requirements:
-- new_content must be complete, properly indented, and include necessary context
-- Include imports if needed
-- Focus on bugs, security, performance, best practices, and style
-- Be thorough but concise
-
-Code to review:
+**CODE TO REVIEW:**
 ```python
 {code}
-```"""
+```
+
+**THINK THROUGH YOUR ANALYSIS:**
+Before providing solutions, mentally verify:
+1. Does my solution actually fix the identified issue?
+2. Is the code syntactically correct and properly indented?
+3. Are all necessary imports included?
+4. Does this maintain the original functionality while improving it?
+5. Is this the most efficient and clean solution?
+
+Now provide your analysis with precise, tested solutions:"""
 
     def _build_review_prompt(
         self,
