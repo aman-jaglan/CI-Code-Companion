@@ -77,73 +77,136 @@ class CodeReviewer:
         }
     
     def _get_review_prompt(self, code: str, file_path: str) -> str:
-        """Generate an advanced Chain of Thought code review prompt."""
+        """Generate a comprehensive Chain of Thought prompt for thorough code review."""
         
-        return f"""You are an expert Python code reviewer. Use systematic thinking to analyze the code thoroughly.
+        return f"""You are an expert software engineer performing a comprehensive code review. Think through this systematically using the following chain of thought process.
 
-**ANALYSIS FRAMEWORK - Think Step by Step:**
+**THINKING PROCESS:**
 
-1. **FIRST PASS - Syntax & Structure Analysis:**
-   - Check for syntax errors, imports, and basic structure
-   - Identify potential runtime errors or logical flaws
-   - Note any missing imports or dependencies
+1. **INITIAL ANALYSIS**: First, scan the entire codebase to understand:
+   - Overall architecture and design patterns used
+   - Dependencies and imports
+   - Main functionality and purpose
+   - Code complexity and structure
 
-2. **SECOND PASS - Security & Performance Review:**
-   - Look for security vulnerabilities (injection, exposure, etc.)
-   - Identify performance bottlenecks or inefficient patterns
-   - Check for resource management issues
+2. **DETAILED EXAMINATION**: For each function, class, and code block, analyze:
+   - Logic correctness and edge cases
+   - Error handling and exception management
+   - Input validation and sanitization
+   - Resource management (memory, files, connections)
+   - Concurrency and thread safety considerations
 
-3. **THIRD PASS - Best Practices & Maintainability:**
-   - Evaluate code style, naming conventions, and readability
-   - Check for code duplication, magic numbers, or anti-patterns
-   - Assess error handling and edge case coverage
+3. **SECURITY ASSESSMENT**: Look for:
+   - SQL injection vulnerabilities (parameterized queries)
+   - Input validation bypasses
+   - Authentication and authorization flaws
+   - Data exposure and privacy issues
+   - Cryptographic weaknesses
+   - Path traversal vulnerabilities
+   - Command injection risks
 
-**SOLUTION REQUIREMENTS:**
-- Provide EXACTLY ONE optimal solution per issue identified
-- Solutions must be syntactically correct and fully functional
-- Include ALL necessary imports and context in the solution
-- Ensure proper indentation and Python best practices
-- Test your solution mentally before providing it
+4. **PERFORMANCE EVALUATION**: Identify:
+   - Algorithmic complexity issues (O(n²) vs O(n))
+   - Database query optimization opportunities
+   - Memory usage patterns and potential leaks
+   - Network call efficiency
+   - Caching opportunities
+   - Loop optimizations and redundant operations
 
-**OUTPUT FORMAT:**
-For each issue found, provide a single JSON object:
+5. **MAINTAINABILITY REVIEW**: Assess:
+   - Code readability and clarity
+   - Naming conventions and consistency
+   - Function/class size and single responsibility
+   - Code duplication and refactoring opportunities
+   - Documentation and comments quality
+   - Testability and modularity
 
-```json
-{{
-    "issue_description": "Concise description of the specific problem",
-    "line_number": "Exact line number or range (e.g., '15' or '10-12')",
-    "old_content": "The problematic code exactly as it appears",
-    "new_content": "Complete, corrected code that is production-ready",
-    "explanation": "Brief explanation of why this change fixes the issue",
-    "impact": ["List of specific improvements this solution provides"],
-    "severity": "critical|high|medium|low",
-    "category": "security|performance|reliability|maintainability|best_practice|bug"
-}}
-```
+6. **BEST PRACTICES CHECK**: Verify adherence to:
+   - Language-specific conventions (PEP 8 for Python)
+   - Design principles (SOLID, DRY, KISS)
+   - Error handling patterns
+   - Logging and monitoring practices
+   - Type hints and documentation
+   - Package structure and imports
 
-**CRITICAL CONSTRAINTS:**
-- NO repetitive or redundant solutions
-- Each solution must be self-contained and complete
-- Solutions must pass Python syntax validation
-- Include proper type hints where beneficial
-- Maintain existing functionality while fixing issues
+**ANALYSIS INSTRUCTIONS:**
 
-**FILE TO ANALYZE:** {file_path}
+Think step-by-step through each section above. For each potential issue you identify:
+- Determine the root cause and impact
+- Assess the severity (critical/high/medium/low)
+- Consider the effort required to fix
+- Think about the best solution approach
+- Verify your reasoning is sound
 
-**CODE TO REVIEW:**
+**OUTPUT REQUIREMENTS:**
+
+Based on your analysis, provide up to 5 most critical issues in JSON format. Prioritize issues by:
+1. Security vulnerabilities (critical)
+2. Logic bugs that cause incorrect behavior (high)
+3. Performance bottlenecks (high/medium)
+4. Maintainability problems (medium/low)
+5. Style and convention issues (low)
+
+For each issue, provide:
+- Clear, actionable description
+- Exact line number(s) affected
+- Current problematic code
+- Improved code solution
+- Brief explanation of why the change is needed (max 1-2 sentences)
+- Specific benefits/impact of the fix
+- Appropriate severity and category
+
+**CRITICAL ISSUES IDENTIFIED:**
+Based on my systematic analysis, here are the most important issues (up to 5, prioritized by severity).
+
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core problem and solution.
+
+**STRICT JSON FORMAT REQUIREMENT:**
+You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
+Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+Use ONLY the fields specified below:
+
+**JSON FORMAT:**
+{{"issue_description":"Clear description","line_number":"X","old_content":"current code","new_content":"fixed code","explanation":"Brief reason for fix (1-2 sentences max)","impact":["benefit1","benefit2"],"severity":"critical|high|medium|low","category":"security|bug|performance|maintainability|style"}}
+
+Each issue must be a separate JSON object on its own line.
+
+**CODE TO REVIEW ({file_path}):**
 ```python
 {code}
 ```
 
-**THINK THROUGH YOUR ANALYSIS:**
-Before providing solutions, mentally verify:
-1. Does my solution actually fix the identified issue?
-2. Is the code syntactically correct and properly indented?
-3. Are all necessary imports included?
-4. Does this maintain the original functionality while improving it?
-5. Is this the most efficient and clean solution?
+**YOUR ANALYSIS:**
+Think through each step systematically, then provide your findings:
 
-Now provide your analysis with precise, tested solutions:"""
+<thinking>
+Let me analyze this code step by step:
+
+1. INITIAL ANALYSIS:
+[Your systematic analysis of overall structure]
+
+2. DETAILED EXAMINATION:
+[Your line-by-line analysis of logic and functionality]
+
+3. SECURITY ASSESSMENT:
+[Your security vulnerability analysis]
+
+4. PERFORMANCE EVALUATION:
+[Your performance bottleneck analysis]
+
+5. MAINTAINABILITY REVIEW:
+[Your code quality and maintainability analysis]
+
+6. BEST PRACTICES CHECK:
+[Your standards and conventions analysis]
+</thinking>
+
+**CRITICAL ISSUES IDENTIFIED:**
+Based on my systematic analysis, here are the most important issues (up to 5, prioritized by severity).
+
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core problem and solution.
+
+```json"""
 
     def _build_review_prompt(
         self,
@@ -151,14 +214,24 @@ Now provide your analysis with precise, tested solutions:"""
         file_path: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None
     ) -> str:
-        """Build the prompt for code review."""
+        """Build the comprehensive prompt for code review with additional context."""
         # Extract file type and relevant context
         file_type = Path(file_path).suffix if file_path else ".py"
         
         base_prompt = self._get_review_prompt(code, file_path or "unknown.py")
 
         if context:
-            base_prompt += f"\n\nContext:\n{json.dumps(context, indent=2)}"
+            context_section = "\n\n**ADDITIONAL CONTEXT:**\n"
+            context_section += f"```json\n{json.dumps(context, indent=2)}\n```\n"
+            context_section += "\nConsider this context in your analysis, especially for understanding the broader system impact.\n"
+            
+            # Insert context before the code section
+            code_marker = "**CODE TO REVIEW"
+            if code_marker in base_prompt:
+                parts = base_prompt.split(code_marker, 1)
+                base_prompt = parts[0] + context_section + code_marker + parts[1]
+            else:
+                base_prompt += context_section
             
         return base_prompt
     
@@ -394,123 +467,317 @@ Additional Context:
             }
     
     def _comprehensive_review(self, diff_content: str, context_info: str) -> str:
-        """Perform comprehensive code review."""
-        # Include context info in the prompt
-        prompt = self._get_review_prompt(diff_content, "unknown.py")
+        """Perform comprehensive code review with Chain of Thought analysis."""
+        prompt = f"""You are an expert software engineer performing a comprehensive code review of a git diff. Use systematic analysis to identify critical issues.
+
+**CHAIN OF THOUGHT ANALYSIS:**
+
+1. **DIFF UNDERSTANDING**: First understand what changed:
+   - What files were modified/added/removed?
+   - What functionality is being added or changed?
+   - Are there any breaking changes?
+   - What is the scope and impact of these changes?
+
+2. **CHANGE IMPACT ANALYSIS**: For each change, consider:
+   - Does this affect existing functionality?
+   - Are there potential integration issues?
+   - Could this introduce regression bugs?
+   - What edge cases might be affected?
+
+3. **SECURITY IMPLICATIONS**: Examine for:
+   - New attack vectors introduced
+   - Data validation on new inputs
+   - Authentication/authorization changes
+   - Exposure of sensitive information
+   - Injection vulnerabilities in modified queries/commands
+
+4. **LOGIC AND CORRECTNESS**: Verify:
+   - Algorithm correctness in modified functions
+   - Proper error handling for new code paths
+   - Boundary conditions and edge cases
+   - State management and data consistency
+
+5. **PERFORMANCE CONSIDERATIONS**: Check for:
+   - New inefficient operations (N+1 queries, nested loops)
+   - Memory usage increases
+   - Database/network operation changes
+   - Caching implications
+
+6. **MAINTAINABILITY FACTORS**: Assess:
+   - Code clarity and readability of changes
+   - Consistency with existing codebase
+   - Documentation updates needed
+   - Test coverage for new functionality
+
+**ANALYSIS PROCESS:**
+Think through each modification systematically. For each potential issue:
+- Identify the specific problem and its root cause
+- Assess severity based on potential impact
+- Consider likelihood of the issue manifesting
+- Think about the best fix approach
+- Verify the fix doesn't introduce new problems
+
+{context_info}
+
+**CODE CHANGES:**
+```diff
+{diff_content}
+```
+
+**SYSTEMATIC ANALYSIS:**
+
+<thinking>
+Let me analyze these changes step by step:
+
+1. DIFF UNDERSTANDING:
+[Analysis of what's changing and why]
+
+2. CHANGE IMPACT ANALYSIS: 
+[Assessment of how changes affect the system]
+
+3. SECURITY IMPLICATIONS:
+[Security vulnerability analysis]
+
+4. LOGIC AND CORRECTNESS:
+[Correctness and edge case analysis]
+
+5. PERFORMANCE CONSIDERATIONS:
+[Performance impact analysis]
+
+6. MAINTAINABILITY FACTORS:
+[Code quality and maintainability analysis]
+</thinking>
+
+**CRITICAL ISSUES IDENTIFIED:**
+Based on my systematic analysis, here are the most important issues (up to 5, prioritized by severity).
+
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core problem and solution.
+
+**STRICT JSON FORMAT REQUIREMENT:**
+You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
+Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+Use ONLY the fields specified below:
+
+**JSON FORMAT:**
+{{"issue_description":"Clear description","line_number":"X","old_content":"current code","new_content":"fixed code","explanation":"Brief reason for fix (1-2 sentences max)","impact":["benefit1","benefit2"],"severity":"critical|high|medium|low","category":"security|bug|performance|maintainability|style"}}
+
+Each issue must be a separate JSON object on its own line.
+
+```json"""
         
         return self.ai_client.analyze_code(prompt, "review")
     
     def _security_review(self, diff_content: str, context_info: str) -> str:
-        """Perform security-focused code review."""
-        prompt = f"""
-Please perform a security-focused review of the following git diff.
+        """Perform security-focused code review with specialized threat analysis."""
+        prompt = f"""You are a cybersecurity expert performing a security-focused code review. Use systematic threat analysis to identify vulnerabilities.
+
+**SECURITY ANALYSIS FRAMEWORK:**
+
+1. **OWASP TOP 10 ASSESSMENT**: Check for:
+   - A01: Broken Access Control (authorization bypasses)
+   - A02: Cryptographic Failures (weak encryption, exposed secrets)
+   - A03: Injection (SQL, NoSQL, Command, LDAP injection)
+   - A04: Insecure Design (missing security controls)
+   - A05: Security Misconfiguration (default configs, verbose errors)
+   - A06: Vulnerable Components (outdated dependencies)
+   - A07: Authentication Failures (weak auth, session issues)
+   - A08: Software Integrity Failures (unsigned/unverified packages)
+   - A09: Logging Failures (insufficient logging/monitoring)
+   - A10: Server-Side Request Forgery (SSRF)
+
+2. **INPUT VALIDATION ANALYSIS**: For all inputs, check:
+   - Are inputs properly sanitized and validated?
+   - Is there proper length/type/format checking?
+   - Are there bypass opportunities for validation?
+   - Is input encoding/decoding handled securely?
+
+3. **AUTHENTICATION & AUTHORIZATION**: Examine:
+   - Are authentication mechanisms properly implemented?
+   - Is authorization checked at all access points?
+   - Are there privilege escalation opportunities?
+   - Is session management secure?
+
+4. **DATA PROTECTION**: Verify:
+   - Are sensitive data properly encrypted at rest/transit?
+   - Is PII/PHI handled according to regulations?
+   - Are secrets/keys properly managed?
+   - Is data exposure minimized?
+
+5. **INJECTION VULNERABILITIES**: Look for:
+   - SQL injection in database queries
+   - Command injection in system calls
+   - LDAP injection in directory queries
+   - NoSQL injection in document databases
+   - Script injection in dynamic code execution
+
+6. **BUSINESS LOGIC FLAWS**: Identify:
+   - Race conditions in critical operations
+   - State manipulation vulnerabilities
+   - Workflow bypass opportunities
+   - Economic/financial logic flaws
+
+**THREAT MODELING PROCESS:**
+For each code change:
+- Identify what new attack surface is created
+- Determine what assets are at risk
+- Assess potential threat actors and their capabilities
+- Evaluate existing security controls
+- Calculate risk based on likelihood × impact
 
 {context_info}
 
-Git Diff:
+**CODE CHANGES:**
 ```diff
 {diff_content}
 ```
 
-Focus specifically on security vulnerabilities and risks:
+**SECURITY THREAT ANALYSIS:**
 
-1. **Input Validation**:
-   - Are user inputs properly validated and sanitized?
-   - SQL injection vulnerabilities
-   - XSS vulnerabilities
-   - Command injection risks
+<thinking>
+Let me perform systematic security analysis:
 
-2. **Authentication & Authorization**:
-   - Proper access controls
-   - Session management
-   - Permission checks
+1. OWASP TOP 10 ASSESSMENT:
+[Check each category against the code changes]
 
-3. **Data Protection**:
-   - Sensitive data exposure
-   - Encryption of sensitive data
-   - Proper handling of credentials
+2. INPUT VALIDATION ANALYSIS:
+[Examine all input handling for vulnerabilities]
 
-4. **Configuration Security**:
-   - Hardcoded secrets or passwords
-   - Insecure default configurations
-   - Environment variable usage
+3. AUTHENTICATION & AUTHORIZATION:
+[Review access control implementation]
 
-5. **Dependencies**:
-   - Known vulnerable dependencies
-   - Insecure library usage
+4. DATA PROTECTION:
+[Assess data handling security]
 
-Please format your response as:
+5. INJECTION VULNERABILITIES:
+[Look for injection attack vectors]
 
-## Security Assessment
-[Overall security posture of the changes]
+6. BUSINESS LOGIC FLAWS:
+[Identify logic-based security issues]
+</thinking>
 
-## Vulnerabilities Found
-[List specific security issues with CRITICAL/HIGH/MEDIUM/LOW severity]
+**SECURITY VULNERABILITIES IDENTIFIED:**
+Based on my threat analysis, here are the critical security issues (up to 5, ordered by risk level).
 
-## Security Recommendations
-[Specific security improvements]
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core security problem and solution.
 
-## Compliance Notes
-[Any regulatory or compliance considerations]
-"""
+**STRICT JSON FORMAT REQUIREMENT:**
+You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
+Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+
+**JSON FORMAT:**
+{{"issue_description":"Security vulnerability description","line_number":"X","old_content":"vulnerable code","new_content":"secure code","explanation":"Brief security reason (1-2 sentences max)","impact":["security benefit1","benefit2"],"severity":"critical|high|medium","category":"security"}}
+
+Each issue must be a separate JSON object on its own line.
+
+```json"""
         
-        return self.ai_client.analyze_code(diff_content, "security")
+        return self.ai_client.analyze_code(prompt, "security")
     
     def _performance_review(self, diff_content: str, context_info: str) -> str:
-        """Perform performance-focused code review."""
-        prompt = f"""
-Please perform a performance-focused review of the following git diff.
+        """Perform performance-focused code review with algorithmic analysis."""
+        prompt = f"""You are a performance optimization expert analyzing code changes for efficiency issues. Use systematic performance analysis techniques.
+
+**PERFORMANCE ANALYSIS FRAMEWORK:**
+
+1. **ALGORITHMIC COMPLEXITY**: Analyze each function for:
+   - Time complexity (Big O notation)
+   - Space complexity and memory usage
+   - Nested loop efficiency
+   - Recursive call depth and memoization opportunities
+   - Search and sort algorithm choices
+
+2. **DATABASE PERFORMANCE**: Examine:
+   - Query efficiency and index usage
+   - N+1 query problems
+   - Batch operation opportunities
+   - Connection pooling and management
+   - Transaction scope and duration
+   - JOIN complexity and query optimization
+
+3. **MEMORY MANAGEMENT**: Check for:
+   - Memory leaks and proper cleanup
+   - Unnecessary object creation
+   - Large object retention
+   - Garbage collection pressure
+   - Memory pooling opportunities
+
+4. **I/O OPERATIONS**: Evaluate:
+   - File system operation efficiency
+   - Network call optimization
+   - Async/await usage for I/O bound operations
+   - Batching of network requests
+   - Streaming vs loading entire datasets
+
+5. **CACHING STRATEGIES**: Assess:
+   - Redundant computation elimination
+   - Appropriate caching levels (memory, disk, distributed)
+   - Cache invalidation strategies
+   - Cache hit ratio optimization
+   - Precomputation opportunities
+
+6. **CONCURRENCY PATTERNS**: Review:
+   - Thread safety and synchronization overhead
+   - Lock contention and deadlock potential
+   - Parallel processing opportunities
+   - Async pattern usage
+   - Resource sharing efficiency
+
+**PERFORMANCE MEASUREMENT APPROACH:**
+For each potential issue:
+- Estimate performance impact (latency, throughput, resource usage)
+- Consider scalability implications
+- Identify bottlenecks and critical paths
+- Evaluate optimization effort vs benefit
+- Think about measurement and monitoring needs
 
 {context_info}
 
-Git Diff:
+**CODE CHANGES:**
 ```diff
 {diff_content}
 ```
 
-Focus specifically on performance implications:
+**PERFORMANCE ANALYSIS:**
 
-1. **Algorithmic Complexity**:
-   - Time complexity analysis
-   - Space complexity considerations
-   - Algorithm efficiency
+<thinking>
+Let me systematically analyze performance implications:
 
-2. **Resource Usage**:
-   - Memory leaks
-   - Resource cleanup
-   - Connection management
+1. ALGORITHMIC COMPLEXITY:
+[Analyze time/space complexity of changed code]
 
-3. **Database Performance**:
-   - Query optimization
-   - Index usage
-   - N+1 query problems
+2. DATABASE PERFORMANCE:
+[Review database operation efficiency]
 
-4. **Caching**:
-   - Caching opportunities
-   - Cache invalidation
-   - Memory caching strategies
+3. MEMORY MANAGEMENT:
+[Assess memory usage patterns]
 
-5. **Scalability**:
-   - Bottleneck identification
-   - Concurrent access handling
-   - Load handling capabilities
+4. I/O OPERATIONS:
+[Evaluate I/O efficiency]
 
-Please format your response as:
+5. CACHING STRATEGIES:
+[Review caching opportunities]
 
-## Performance Assessment
-[Overall performance impact of the changes]
+6. CONCURRENCY PATTERNS:
+[Analyze concurrent execution efficiency]
+</thinking>
 
-## Performance Issues
-[List specific performance concerns with HIGH/MEDIUM/LOW impact]
+**PERFORMANCE ISSUES IDENTIFIED:**
+Based on my performance analysis, here are the critical efficiency issues (up to 5, prioritized by impact).
 
-## Optimization Recommendations
-[Specific performance improvements]
+**IMPORTANT**: Keep explanations brief and to the point (max 1-2 sentences). Focus on the core performance problem and solution.
 
-## Scalability Notes
-[Considerations for scale]
-"""
+**STRICT JSON FORMAT REQUIREMENT:**
+You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
+Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+
+**JSON FORMAT:**
+{{"issue_description":"Performance issue description","line_number":"X","old_content":"slow code","new_content":"optimized code","explanation":"Brief performance reason (1-2 sentences max)","impact":["performance benefit1","benefit2"],"severity":"high|medium|low","category":"performance"}}
+
+Each issue must be a separate JSON object on its own line.
+
+```json"""
         
-        return self.ai_client.analyze_code(diff_content, "performance")
+        return self.ai_client.analyze_code(prompt, "performance")
     
     def _parse_review_response(self, ai_response: Dict[str, Any], review_type: str) -> Dict[str, Any]:
         """
