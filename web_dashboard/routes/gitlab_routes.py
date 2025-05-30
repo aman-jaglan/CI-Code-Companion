@@ -138,7 +138,7 @@ def gitlab_callback():
             # Get current user info
             current_user = gl.user
             logger.info(f"Successfully authenticated with GitLab API as user: {current_user.username}")
-            return redirect(url_for('dashboard'))
+            return redirect('/projects')  # Redirect to project selector instead of dashboard
         except gitlab.exceptions.GitlabAuthenticationError as e:
             logger.error(f"GitLab API authentication failed: {str(e)}")
             session.pop('gitlab_token', None)

@@ -1,62 +1,359 @@
-.diff-viewer-container {
+/* Monaco Editor Diff Viewer Styles */
+
+:root {
+    /* Core Colors - Only Red and Green for diffs */
+    --diff-red: #dc2626;
+    --diff-red-bg: rgba(220, 38, 38, 0.15);
+    --diff-red-border: rgba(220, 38, 38, 0.3);
+    --diff-green: #16a34a;
+    --diff-green-bg: rgba(22, 163, 74, 0.15);
+    --diff-green-border: rgba(22, 163, 74, 0.3);
+    
+    /* UI Colors */
+    --ui-bg: #1e1e1e;
+    --ui-text: #d4d4d4;
+    --ui-border: #404040;
+    --ui-hover: #2d2d2d;
+    --ui-active: #3d3d3d;
+    
+    /* Badge Colors */
+    --severity-critical: #ef4444;
+    --severity-high: #f97316;
+    --severity-medium: #eab308;
+    --severity-low: #22c55e;
+    
+    /* Category Colors */
+    --category-security: #dc2626;
+    --category-performance: #2563eb;
+    --category-style: #8b5cf6;
+    --category-best-practice: #16a34a;
+    --category-general: #6b7280;
+}
+
+/* Container Styles */
+.diff-container {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: 1rem;
-    background: #1e1e1e;
-    border-radius: 4px;
+    height: 100%;
+    background-color: var(--ui-bg);
+    color: var(--ui-text);
+    border: 1px solid var(--ui-border);
+    border-radius: 6px;
+    overflow: hidden;
 }
 
-.diff-editor {
-    border: 1px solid #333;
-    border-radius: 4px;
-    height: 500px;
-}
-
-.diff-actions {
+/* Editor Header */
+.editor-header {
     display: flex;
-    gap: 1rem;
-    padding: 1rem 0;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 16px;
+    background-color: var(--ui-bg);
+    border-bottom: 1px solid var(--ui-border);
 }
 
-.diff-suggestion-info {
-    background: #252525;
-    padding: 1rem;
+/* Tab Buttons */
+.editor-tabs {
+    display: flex;
+    gap: 8px;
+}
+
+.tab-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--ui-border);
     border-radius: 4px;
+    color: var(--ui-text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+    background-color: var(--ui-hover);
+}
+
+.tab-button.active {
+    background-color: var(--ui-active);
+    border-color: var(--diff-green);
+}
+
+.tab-button i {
+    font-size: 14px;
+}
+
+/* Control Buttons */
+.editor-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.control-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--ui-border);
+    border-radius: 4px;
+    color: var(--ui-text);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+    background-color: var(--ui-hover);
+}
+
+.control-btn i {
+    font-size: 14px;
+}
+
+/* Monaco Editor Container */
+.monaco-editor-container {
+    flex: 1;
+    position: relative;
+    min-height: 300px;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--ui-border);
+    border-top-color: var(--diff-green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Suggestion Panel */
+.suggestion-panel {
+    background-color: var(--ui-bg);
+    border-top: 1px solid var(--ui-border);
+    padding: 16px;
+    max-height: 40%;
+    overflow-y: auto;
+}
+
+.suggestion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.suggestion-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.suggestion-badges {
+    display: flex;
+    gap: 8px;
+}
+
+/* Severity Badges */
+.severity-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.severity-critical { background-color: var(--severity-critical); }
+.severity-high { background-color: var(--severity-high); }
+.severity-medium { background-color: var(--severity-medium); }
+.severity-low { background-color: var(--severity-low); }
+
+/* Category Badges */
+.category-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.category-security { background-color: var(--category-security); }
+.category-performance { background-color: var(--category-performance); }
+.category-style { background-color: var(--category-style); }
+.category-best-practice { background-color: var(--category-best-practice); }
+.category-general { background-color: var(--category-general); }
+
+/* Description and Explanation */
+.suggestion-description {
+    margin: 12px 0;
+    line-height: 1.5;
+}
+
+.suggestion-explanation {
+    background-color: var(--ui-hover);
+    padding: 12px;
+    border-radius: 4px;
+    margin: 12px 0;
+    line-height: 1.5;
+}
+
+.suggestion-explanation i {
+    color: var(--diff-green);
+    margin-right: 8px;
+}
+
+/* Impact List */
+.impact-list {
+    margin: 16px 0;
+}
+
+.impact-list h4 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 .impact-list ul {
-    margin: 0.5rem 0;
-    padding-left: 1.5rem;
+    margin: 0;
+    padding-left: 24px;
 }
 
-.badge {
-    padding: 0.5em 1em;
+.impact-list li {
+    margin: 4px 0;
+    line-height: 1.5;
+}
+
+/* Action Buttons */
+.diff-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
     border-radius: 4px;
-    font-size: 0.875rem;
-    margin-right: 0.5rem;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
 
-.badge-critical { background: #dc3545; }
-.badge-high { background: #fd7e14; }
-.badge-medium { background: #ffc107; }
-.badge-low { background: #28a745; }
-.badge-info { background: #17a2b8; }
-
-.diff-line-deleted {
-    background: rgba(255, 107, 107, 0.1);
+.btn i {
+    font-size: 14px;
 }
 
-.diff-line-inserted {
-    background: rgba(81, 207, 102, 0.1);
+.btn-primary {
+    background-color: var(--diff-green);
+    color: white;
 }
 
-.diff-glyph-deleted::before {
-    content: '-';
-    color: #ff6b6b;
+.btn-primary:hover {
+    background-color: #15803d;
 }
 
-.diff-glyph-inserted::before {
-    content: '+';
-    color: #51cf66;
+.btn-secondary {
+    background-color: var(--ui-active);
+    color: var(--ui-text);
+}
+
+.btn-secondary:hover {
+    background-color: var(--ui-hover);
+}
+
+.btn-danger {
+    background-color: var(--diff-red);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #b91c1c;
+}
+
+/* Feedback Toast */
+.feedback-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 24px;
+    border-radius: 6px;
+    background-color: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+}
+
+.toast-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.feedback-success { border-color: var(--diff-green); }
+.feedback-error { border-color: var(--diff-red); }
+.feedback-info { border-color: var(--ui-border); }
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Line Decorations */
+.line-insert {
+    background-color: var(--diff-green-bg) !important;
+    border-left: 2px solid var(--diff-green) !important;
+}
+
+.margin-insert {
+    background-color: var(--diff-green-bg) !important;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .editor-header {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .editor-tabs, .editor-controls {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .suggestion-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .diff-actions {
+        flex-direction: column;
+    }
+    
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
 } 
