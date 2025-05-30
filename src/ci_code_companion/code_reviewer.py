@@ -164,10 +164,15 @@ Based on my systematic analysis, here are the most important issues (up to 5, pr
 **STRICT JSON FORMAT REQUIREMENT:**
 You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
 Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
-Use ONLY the fields specified below:
+
+**CRITICAL REQUIREMENT: EVERY VULNERABILITY MUST HAVE A SOLUTION**
+- The "new_content" field is MANDATORY and must contain actual secure code
+- Do NOT leave "new_content" empty - provide concrete security fixes
+- If you identify a vulnerability, you MUST provide a working secure solution
+- If no fix is possible, do NOT report the vulnerability
 
 **JSON FORMAT:**
-{{"issue_description":"Clear description","line_number":"X","old_content":"current code","new_content":"fixed code","explanation":"Brief reason for fix (1-2 sentences max)","impact":["benefit1","benefit2"],"severity":"critical|high|medium|low","category":"security|bug|performance|maintainability|style"}}
+{{"issue_description":"Security vulnerability description","line_number":"X","old_content":"vulnerable code","new_content":"secure code","explanation":"Brief security reason (1-2 sentences max)","impact":["security benefit1","benefit2"],"severity":"critical|high|medium","category":"security"}}
 
 Each issue must be a separate JSON object on its own line.
 
@@ -556,10 +561,15 @@ Based on my systematic analysis, here are the most important issues (up to 5, pr
 **STRICT JSON FORMAT REQUIREMENT:**
 You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
 Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
-Use ONLY the fields specified below:
+
+**CRITICAL REQUIREMENT: EVERY PERFORMANCE ISSUE MUST HAVE A SOLUTION**
+- The "new_content" field is MANDATORY and must contain actual optimized code
+- Do NOT leave "new_content" empty - provide concrete performance optimizations
+- If you identify a performance issue, you MUST provide a working optimized solution
+- If no optimization is possible, do NOT report the issue
 
 **JSON FORMAT:**
-{{"issue_description":"Clear description","line_number":"X","old_content":"current code","new_content":"fixed code","explanation":"Brief reason for fix (1-2 sentences max)","impact":["benefit1","benefit2"],"severity":"critical|high|medium|low","category":"security|bug|performance|maintainability|style"}}
+{{"issue_description":"Performance issue description","line_number":"X","old_content":"slow code","new_content":"optimized code","explanation":"Brief performance reason (1-2 sentences max)","impact":["performance benefit1","benefit2"],"severity":"high|medium|low","category":"performance"}}
 
 Each issue must be a separate JSON object on its own line.
 
@@ -663,6 +673,12 @@ Based on my threat analysis, here are the critical security issues (up to 5, ord
 **STRICT JSON FORMAT REQUIREMENT:**
 You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
 Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+
+**CRITICAL REQUIREMENT: EVERY VULNERABILITY MUST HAVE A SOLUTION**
+- The "new_content" field is MANDATORY and must contain actual secure code
+- Do NOT leave "new_content" empty - provide concrete security fixes
+- If you identify a vulnerability, you MUST provide a working secure solution
+- If no fix is possible, do NOT report the vulnerability
 
 **JSON FORMAT:**
 {{"issue_description":"Security vulnerability description","line_number":"X","old_content":"vulnerable code","new_content":"secure code","explanation":"Brief security reason (1-2 sentences max)","impact":["security benefit1","benefit2"],"severity":"critical|high|medium","category":"security"}}
@@ -769,6 +785,12 @@ Based on my performance analysis, here are the critical efficiency issues (up to
 **STRICT JSON FORMAT REQUIREMENT:**
 You MUST use EXACTLY this JSON format with EXACTLY these field names. Do NOT create your own format.
 Do NOT use fields like "file", "title", "description", "suggestion", "line_start", "line_end".
+
+**CRITICAL REQUIREMENT: EVERY PERFORMANCE ISSUE MUST HAVE A SOLUTION**
+- The "new_content" field is MANDATORY and must contain actual optimized code
+- Do NOT leave "new_content" empty - provide concrete performance optimizations
+- If you identify a performance issue, you MUST provide a working optimized solution
+- If no optimization is possible, do NOT report the issue
 
 **JSON FORMAT:**
 {{"issue_description":"Performance issue description","line_number":"X","old_content":"slow code","new_content":"optimized code","explanation":"Brief performance reason (1-2 sentences max)","impact":["performance benefit1","benefit2"],"severity":"high|medium|low","category":"performance"}}
