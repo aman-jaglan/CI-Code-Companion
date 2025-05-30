@@ -964,38 +964,34 @@ Each issue must be a separate JSON object on its own line.
                     logger.warning(f"_validate_suggestion_format: Invalid impact item '{impact_item}' in suggestion: {suggestion}")
                     return False
             
-            # Validate code content is substantial
+            # Validate code content is substantial and MUST have solution
             old_content = suggestion["old_content"].strip()
             new_content = suggestion["new_content"].strip()
             
-            if not old_content or not new_content:
-                logger.warning(f"_validate_suggestion_format: Empty code content in suggestion: {suggestion}")
+            if not old_content:
+                logger.warning(f"_validate_suggestion_format: Empty old_content in suggestion: {suggestion}")
                 return False
             
-            # Check that new_content is different from old_content (unless it's a style fix)
-            if old_content == new_content and suggestion["category"] not in ["style", "best_practice"]:
-                logger.warning(f"_validate_suggestion_format: Identical old and new content for non-style issue: {suggestion}")
+            # EVERY issue MUST have a solution - no exceptions
+            if not new_content:
+                logger.warning(f"_validate_suggestion_format: Every issue must have a solution. Empty new_content in suggestion: {suggestion}")
                 return False
             
-            # Basic Python syntax validation for new_content (if it looks like Python code)
-            if suggestion["category"] in ["bug", "security", "performance", "reliability"]:
-                try:
-                    # Try to parse the new_content as Python (if it contains Python-like syntax)
-                    if any(keyword in new_content for keyword in ["def ", "class ", "import ", "from ", "if ", "for ", "while "]):
-                        import ast
-                        # Wrap in a function if it's just a code snippet
-                        test_code = new_content
-                        if not (test_code.strip().startswith(("def ", "class ", "import ", "from "))):
-                            test_code = f"def temp_func():\n    {new_content.replace(chr(10), chr(10) + '    ')}"
-                        
-                        try:
-                            ast.parse(test_code)
-                        except SyntaxError as e:
-                            logger.warning(f"_validate_suggestion_format: New content has syntax errors: {e}. Content: {new_content}")
-                            return False
-                except Exception:
-                    # If we can't validate syntax, that's okay - continue
-                    pass
+            # Ensure the solution is meaningful and different
+            if old_content == new_content:
+                logger.warning(f"_validate_suggestion_format: Solution must be different from the problem. Identical old and new content: {suggestion}")
+                return False
+            
+            # Check that the solution is substantial (more than trivial changes)
+            similarity = self._calculate_content_similarity(old_content, new_content)
+            if similarity > 0.95:  # Too similar, probably not a real fix
+                logger.warning(f"_validate_suggestion_format: Solution too similar to original code (similarity: {similarity}): {suggestion}")
+                return False
+            
+            # Ensure the new content is meaningful (not just whitespace changes)
+            if len(new_content.strip()) < 3:
+                logger.warning(f"_validate_suggestion_format: Solution too short or trivial: {suggestion}")
+                return False
             
             logger.debug(f"_validate_suggestion_format: Suggestion passed enhanced validation: {suggestion}")
             return True
