@@ -11,8 +11,10 @@ import json
 
 from ci_code_companion.models import (
     Repository, Commit, CodeFile, FileChange, 
-    AIAnalysis, CodeIssue, PerformanceMetrics
+    AIAnalysis, CodeIssue, PerformanceMetrics,
+    AIContextCache, AILearning
 )
+from ci_code_companion.ai_context_manager import AIContextManager
 
 # Create blueprint
 api = Blueprint('api', __name__, url_prefix='/api/v2')
@@ -440,4 +442,145 @@ def gitlab_disconnect():
     return jsonify({
         'success': True,
         'message': 'GitLab disconnected successfully'
-    }) 
+    })
+
+@api.route('/repository/<int:repo_id>/context', methods=['GET'])
+def get_repository_context(repo_id):
+    """Get comprehensive repository context including file relationships"""
+    try:
+        session = init_database()
+        context_manager = AIContextManager(session)
+        
+        # Get context with optional file paths filter
+        file_paths = request.args.getlist('files')
+        context = context_manager.build_comprehensive_context(
+            repository_id=repo_id,
+            file_paths=file_paths if file_paths else None
+        )
+        
+        return jsonify({
+            'success': True,
+            'context': context
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@api.route('/repository/<int:repo_id>/file-relationships', methods=['GET'])
+def get_file_relationships(repo_id):
+    """Get detailed file relationships and dependencies"""
+    try:
+        session = init_database()
+        context_manager = AIContextManager(session)
+        
+        # Get file relationships with visualization data
+        relationships = context_manager._get_file_relationships(repo_id)
+        
+        # Enhance with visualization metadata
+        visualization_data = {
+            'nodes': [],
+            'edges': [],
+            'clusters': []
+        }
+        
+        # Build visualization graph
+        for file_path, deps in relationships.get('dependencies', {}).items():
+            # Add file node
+            visualization_data['nodes'].append({
+                'id': file_path,
+                'label': file_path.split('/')[-1],
+                'type': 'file',
+                'group': file_path.split('/')[0],  # Group by top-level directory
+                'metrics': {
+                    'size': deps.get('size', 1),
+                    'complexity': deps.get('complexity', 1)
+                }
+            })
+            
+            # Add dependency edges
+            for dep in deps.get('imports', []):
+                visualization_data['edges'].append({
+                    'from': file_path,
+                    'to': dep,
+                    'type': 'imports'
+                })
+        
+        return jsonify({
+            'success': True,
+            'relationships': relationships,
+            'visualization': visualization_data
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@api.route('/repository/<int:repo_id>/cache/build', methods=['POST'])
+def build_repository_cache(repo_id):
+    """Build or rebuild repository cache"""
+    try:
+        session = init_database()
+        context_manager = AIContextManager(session)
+        
+        # Force rebuild all caches
+        context = context_manager.build_comprehensive_context(
+            repository_id=repo_id,
+            force_rebuild=True
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Repository cache rebuilt successfully',
+            'cache_stats': {
+                'architecture_context': bool(context.get('architecture_context')),
+                'historical_patterns': bool(context.get('historical_patterns')),
+                'file_relationships': bool(context.get('file_relationships')),
+                'security_context': bool(context.get('security_context')),
+                'performance_context': bool(context.get('performance_context'))
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@api.route('/repository/<int:repo_id>/test-impact', methods=['POST'])
+def analyze_test_impact(repo_id):
+    """Analyze impact of changes on tests and suggest new test cases"""
+    try:
+        session = init_database()
+        data = request.get_json()
+        
+        # Get changed files
+        changed_files = data.get('changed_files', [])
+        
+        # Get repository context
+        context_manager = AIContextManager(session)
+        context = context_manager.build_comprehensive_context(
+            repository_id=repo_id,
+            file_paths=changed_files
+        )
+        
+        # Analyze test impact
+        test_impact = {
+            'affected_tests': [],
+            'suggested_tests': [],
+            'coverage_impact': {},
+            'risk_assessment': {}
+        }
+        
+        # TODO: Implement detailed test impact analysis
+        
+        return jsonify({
+            'success': True,
+            'test_impact': test_impact
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500 

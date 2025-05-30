@@ -85,6 +85,9 @@
             border-right: 1px solid #334155;
             display: flex;
             flex-direction: column;
+            width: var(--sidebar-width);
+            min-width: 320px;
+            max-width: 500px;
         }
         
         .sidebar-content {
@@ -111,39 +114,79 @@
         }
         
         .file-tree-item {
-            padding: 6px 12px;
+            padding: 4px 0;
             cursor: pointer;
             display: flex;
             align-items: center;
             transition: background-color 0.2s;
-            flex-shrink: 0;
+            position: relative;
+            border-radius: 4px;
+            margin: 1px 8px;
         }
         
         .file-tree-item:hover {
-            background-color: #334155;
+            background-color: #374151;
         }
         
         .file-tree-item.selected {
             background-color: #3b82f6;
+            color: white;
         }
         
-        .file-tree-item .icon {
+        .file-tree-item.has-issues {
+            border-left: 3px solid #ef4444;
+        }
+        
+        .file-tree-item.modified {
+            border-left: 3px solid #f59e0b;
+        }
+        
+        .tree-indent {
+            width: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .tree-toggle {
+            width: 16px;
+            height: 16px;
+            border: none;
+            background: none;
+            color: #9ca3af;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 2px;
+        }
+        
+        .tree-toggle:hover {
+            background-color: #4b5563;
+            color: #e5e7eb;
+        }
+        
+        .file-icon {
             width: 20px;
             margin-right: 8px;
             text-align: center;
             flex-shrink: 0;
         }
         
-        .commit-item {
-            padding: 12px;
-            border-bottom: 1px solid #334155;
-            transition: background-color 0.2s;
-            flex-shrink: 0;
+        .file-status {
+            margin-left: auto;
+            margin-right: 8px;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
         }
         
-        .commit-item:hover {
-            background-color: #334155;
-        }
+        .status-modified { background: #f59e0b; color: #000; }
+        .status-issues { background: #ef4444; color: #fff; }
+        .status-new { background: #10b981; color: #fff; }
+        .status-selected { background: #3b82f6; color: #fff; }
         
         .bottom-panel {
             background: #1e293b;
@@ -357,6 +400,41 @@
             width: 3px !important;
         }
         
+        /* Diff visualization styles */
+        .diff-removed {
+            background-color: rgba(255, 107, 107, 0.2) !important;
+            border: 1px solid rgba(255, 107, 107, 0.6) !important;
+            animation: highlightRemoved 0.5s ease-in-out;
+        }
+        
+        .diff-removed-glyph {
+            background-color: #ff6b6b !important;
+            width: 4px !important;
+        }
+        
+        .diff-added {
+            background-color: rgba(34, 197, 94, 0.2) !important;
+            border: 1px solid rgba(34, 197, 94, 0.6) !important;
+            animation: highlightAdded 0.5s ease-in-out;
+        }
+        
+        .diff-added-glyph {
+            background-color: #22c55e !important;
+            width: 4px !important;
+        }
+        
+        @keyframes highlightRemoved {
+            0% { background-color: rgba(255, 107, 107, 0.1); }
+            50% { background-color: rgba(255, 107, 107, 0.4); }
+            100% { background-color: rgba(255, 107, 107, 0.2); }
+        }
+        
+        @keyframes highlightAdded {
+            0% { background-color: rgba(34, 197, 94, 0.1); }
+            50% { background-color: rgba(34, 197, 94, 0.4); }
+            100% { background-color: rgba(34, 197, 94, 0.2); }
+        }
+        
         /* Notification animation */
         .notification-enter {
             transform: translateX(100%);
@@ -374,6 +452,486 @@
         .notification-exit-active {
             transform: translateX(100%);
             transition: transform 0.3s ease-in;
+        }
+        
+        /* Enhanced Sidebar Styles */
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #334155;
+            background: #0f172a;
+            flex-shrink: 0;
+        }
+        
+        .global-search {
+            width: 100%;
+            background: #374151;
+            border: 1px solid #4b5563;
+            color: #e5e7eb;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .global-search:focus {
+            outline: none;
+            border-color: #3b82f6;
+            background: #1f2937;
+        }
+        
+        .sidebar-sections {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar-section {
+            border-bottom: 1px solid #334155;
+            background: #1e293b;
+        }
+        
+        .section-header {
+            padding: 12px 16px;
+            background: #374151;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .section-header:hover {
+            background: #4b5563;
+        }
+        
+        .section-header.collapsed {
+            border-bottom: none;
+        }
+        
+        .section-content {
+            max-height: 400px;
+            overflow-y: auto;
+            transition: max-height 0.3s ease;
+        }
+        
+        .section-content.collapsed {
+            max-height: 0;
+            overflow: hidden;
+        }
+        
+        .section-icon {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+        
+        .expand-icon {
+            transition: transform 0.2s;
+        }
+        
+        .expand-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        
+        /* Enhanced File Tree */
+        .file-tree {
+            padding: 0;
+        }
+        
+        .file-tree-item {
+            padding: 4px 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: background-color 0.2s;
+            position: relative;
+            border-radius: 4px;
+            margin: 1px 8px;
+        }
+        
+        .file-tree-item:hover {
+            background-color: #374151;
+        }
+        
+        .file-tree-item.selected {
+            background-color: #3b82f6;
+            color: white;
+        }
+        
+        .file-tree-item.has-issues {
+            border-left: 3px solid #ef4444;
+        }
+        
+        .file-tree-item.modified {
+            border-left: 3px solid #f59e0b;
+        }
+        
+        .tree-indent {
+            width: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .tree-toggle {
+            width: 16px;
+            height: 16px;
+            border: none;
+            background: none;
+            color: #9ca3af;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 2px;
+        }
+        
+        .tree-toggle:hover {
+            background-color: #4b5563;
+            color: #e5e7eb;
+        }
+        
+        .file-icon {
+            width: 20px;
+            margin-right: 8px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        
+        .file-status {
+            margin-left: auto;
+            margin-right: 8px;
+            font-size: 10px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        
+        .status-modified { background: #f59e0b; color: #000; }
+        .status-issues { background: #ef4444; color: #fff; }
+        .status-new { background: #10b981; color: #fff; }
+        .status-selected { background: #3b82f6; color: #fff; }
+        
+        /* Enhanced Commits View */
+        .commits-container {
+            padding: 0;
+        }
+        
+        .branch-selector {
+            padding: 12px 16px;
+            border-bottom: 1px solid #374151;
+            background: #1f2937;
+        }
+        
+        .branch-dropdown {
+            width: 100%;
+            background: #374151;
+            border: 1px solid #4b5563;
+            color: #e5e7eb;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        .git-graph {
+            padding: 16px;
+            border-bottom: 1px solid #374151;
+            background: #0f172a;
+        }
+        
+        .branch-line {
+            display: flex;
+            align-items: center;
+            margin: 4px 0;
+            font-size: 12px;
+        }
+        
+        .branch-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .branch-main { background: #22c55e; }
+        .branch-feature { background: #3b82f6; }
+        .branch-hotfix { background: #ef4444; }
+        
+        .branch-line-svg {
+            flex: 1;
+            height: 2px;
+            background: currentColor;
+            margin: 0 8px;
+            opacity: 0.6;
+        }
+        
+        .commit-timeline {
+            padding: 0;
+        }
+        
+        .commit-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #374151;
+            transition: background-color 0.2s;
+            position: relative;
+        }
+        
+        .commit-item:hover {
+            background-color: #374151;
+        }
+        
+        .commit-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        
+        .commit-avatar {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background: #6b7280;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        
+        .commit-author-you { background: #10b981; }
+        .commit-author-team { background: #3b82f6; }
+        .commit-author-external { background: #f59e0b; }
+        
+        .commit-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .commit-message {
+            font-weight: 500;
+            font-size: 13px;
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .commit-meta {
+            font-size: 11px;
+            color: #9ca3af;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .commit-stats {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+        
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #9ca3af;
+        }
+        
+        .stat-added { color: #22c55e; }
+        .stat-removed { color: #ef4444; }
+        
+        /* Enhanced PR Dashboard */
+        .pr-container {
+            padding: 0;
+        }
+        
+        .pr-filter {
+            padding: 12px 16px;
+            border-bottom: 1px solid #374151;
+            background: #1f2937;
+        }
+        
+        .pr-filter-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-btn {
+            padding: 4px 8px;
+            border: 1px solid #4b5563;
+            background: #374151;
+            color: #e5e7eb;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .filter-btn.active {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: white;
+        }
+        
+        .pr-group {
+            margin-bottom: 16px;
+        }
+        
+        .pr-group-header {
+            padding: 8px 16px;
+            background: #374151;
+            font-size: 12px;
+            font-weight: 600;
+            color: #d1d5db;
+            border-bottom: 1px solid #4b5563;
+        }
+        
+        .pr-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #374151;
+            transition: background-color 0.2s;
+            position: relative;
+        }
+        
+        .pr-item:hover {
+            background-color: #374151;
+        }
+        
+        .pr-item.urgent {
+            border-left: 4px solid #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .pr-item.ready {
+            border-left: 4px solid #22c55e;
+        }
+        
+        .pr-item.draft {
+            opacity: 0.7;
+            border-left: 4px solid #6b7280;
+        }
+        
+        .pr-header {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        
+        .pr-status-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 8px;
+            margin-top: 2px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        
+        .pr-status-draft { background: #6b7280; }
+        .pr-status-review { background: #f59e0b; }
+        .pr-status-ready { background: #22c55e; }
+        .pr-status-urgent { background: #ef4444; }
+        
+        .pr-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .pr-title {
+            font-weight: 500;
+            font-size: 13px;
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+        
+        .pr-meta {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-bottom: 6px;
+        }
+        
+        .pr-status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .status-badge {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+        
+        .badge-approved { background: #22c55e; color: white; }
+        .badge-changes { background: #f59e0b; color: black; }
+        .badge-pending { background: #6b7280; color: white; }
+        .badge-failing { background: #ef4444; color: white; }
+        .badge-passing { background: #22c55e; color: white; }
+        
+        .pr-labels {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        
+        .label {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+        
+        .label-security { background: #dc2626; color: white; }
+        .label-feature { background: #3b82f6; color: white; }
+        .label-hotfix { background: #f59e0b; color: black; }
+        .label-frontend { background: #8b5cf6; color: white; }
+        
+        /* Stats Section */
+        .stats-section {
+            padding: 12px 16px;
+            background: #0f172a;
+            font-size: 12px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        
+        .stat-card {
+            background: #1f2937;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #3b82f6;
+        }
+        
+        .stat-label {
+            color: #9ca3af;
+            font-size: 10px;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+            .sidebar {
+                width: 280px;
+            }
         }
     </style>
 </head>
@@ -469,134 +1027,324 @@
     <div class="main-layout">
         <!-- Sidebar -->
         <div class="sidebar">
-            <!-- Sidebar Tabs -->
-            <div class="sidebar-tabs flex border-b border-gray-600">
-                <button @click="activeTab = 'files'" 
-                        :class="{'bg-blue-600': activeTab === 'files', 'bg-gray-700': activeTab !== 'files'}"
-                        class="flex-1 px-4 py-3 text-sm font-medium">
-                    <i class="fas fa-folder-tree mr-2"></i>
-                    Files
-                </button>
-                <button @click="activeTab = 'commits'" 
-                        :class="{'bg-blue-600': activeTab === 'commits', 'bg-gray-700': activeTab !== 'commits'}"
-                        class="flex-1 px-4 py-3 text-sm font-medium">
-                    <i class="fas fa-history mr-2"></i>
-                    Commits
-                </button>
-                <button @click="activeTab = 'pullrequests'" 
-                        :class="{'bg-blue-600': activeTab === 'pullrequests', 'bg-gray-700': activeTab !== 'pullrequests'}"
-                        class="flex-1 px-4 py-3 text-sm font-medium">
-                    <i class="fas fa-code-pull-request mr-2"></i>
-                    PRs
-                </button>
+            <!-- Global Search Header -->
+            <div class="sidebar-header">
+                <input type="text" x-model="globalSearch" @input="performGlobalSearch()" 
+                       placeholder="Search files, commits, PRs..." class="global-search">
             </div>
 
-            <!-- Sidebar Content -->
-            <div class="sidebar-content">
-                <!-- Files Tab -->
-                <div x-show="activeTab === 'files'" class="tab-content active">
-                    <!-- Search -->
-                    <div class="search-section p-4 border-b border-gray-600">
-                        <input type="text" x-model="fileSearch" @input="filterFiles()" 
-                               placeholder="Search files..." class="search-box">
+            <!-- Collapsible Sections -->
+            <div class="sidebar-sections">
+                <!-- Files Explorer Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" @click="toggleSection('files')" 
+                         :class="{'collapsed': collapsedSections.files}">
+                        <div class="flex items-center">
+                            <i class="section-icon fas fa-folder-tree"></i>
+                            <span>FILES EXPLORER</span>
+                        </div>
+                        <i class="expand-icon fas fa-chevron-down" 
+                           :class="{'collapsed': collapsedSections.files}"></i>
                     </div>
                     
-                    <!-- Breadcrumb -->
-                    <div class="breadcrumb" x-show="currentPath">
-                        <template x-for="(part, index) in pathParts" :key="index">
-                            <span>
-                                <a href="#" @click="navigateToPath(getPathUpTo(index))" x-text="part"></a>
-                                <span x-show="index < pathParts.length - 1" class="mx-2 text-gray-500">/</span>
-                            </span>
-                        </template>
-                    </div>
-                    
-                    <!-- File Tree -->
-                    <div class="file-tree">
-                        <template x-for="item in filteredFiles" :key="item.path">
-                            <div @click="selectFile(item)" 
-                                 :class="{'selected': selectedFile?.path === item.path}"
-                                 class="file-tree-item">
-                                <i :class="getFileIcon(item)" class="icon"></i>
-                                <span x-text="item.name" class="flex-1 truncate"></span>
-                                <span x-show="item.type === 'tree'" class="text-xs text-gray-400">
-                                    <i class="fas fa-chevron-right"></i>
+                    <div class="section-content" :class="{'collapsed': collapsedSections.files}">
+                        <!-- Breadcrumb Navigation -->
+                        <div x-show="currentPath" class="breadcrumb">
+                            <template x-for="(part, index) in pathParts" :key="index">
+                                <span>
+                                    <a href="#" @click="navigateToPath(getPathUpTo(index))" x-text="part"></a>
+                                    <span x-show="index < pathParts.length - 1" class="mx-2 text-gray-500">/</span>
                                 </span>
-                            </div>
-                        </template>
+                            </template>
+                        </div>
+                        
+                        <!-- Hierarchical File Tree -->
+                        <div class="file-tree">
+                            <template x-for="item in filteredFiles" :key="item.path">
+                                <div class="file-tree-item" 
+                                     @click="handleFileClick(item)"
+                                     :class="{
+                                         'selected': selectedFile?.path === item.path,
+                                         'has-issues': item.hasIssues,
+                                         'modified': item.isModified
+                                     }"
+                                     :style="'padding-left: ' + (item.depth * 20 + 16) + 'px'">
+                                    
+                                    <!-- Tree Toggle -->
+                                    <div class="tree-indent">
+                                        <button x-show="item.type === 'tree'" 
+                                                @click.stop="toggleFileTreeItem(item)"
+                                                class="tree-toggle">
+                                            <i :class="item.expanded ? 'fas fa-chevron-down' : 'fas fa-chevron-right'"></i>
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- File Icon -->
+                                    <i :class="getFileIcon(item)" class="file-icon"></i>
+                                    
+                                    <!-- File Name -->
+                                    <span class="flex-1 truncate" x-text="item.name"></span>
+                                    
+                                    <!-- Status Indicators -->
+                                    <div class="file-status" x-show="getFileStatus(item)">
+                                        <span :class="getFileStatusClass(item)" x-text="getFileStatus(item)"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Commits Tab -->
-                <div x-show="activeTab === 'commits'" class="tab-content">
-                    <div class="tab-header p-4 border-b border-gray-600">
-                        <h3 class="font-medium mb-2">Recent Commits</h3>
-                        <div class="flex items-center space-x-2 text-sm text-gray-400">
-                            <span x-text="commits.length">0</span>
-                            <span>commits on</span>
-                            <span x-text="currentBranch">main</span>
+                <!-- Commits & History Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" @click="toggleSection('commits')" 
+                         :class="{'collapsed': collapsedSections.commits}">
+                        <div class="flex items-center">
+                            <i class="section-icon fas fa-code-commit"></i>
+                            <span>COMMITS & HISTORY</span>
                         </div>
+                        <i class="expand-icon fas fa-chevron-down" 
+                           :class="{'collapsed': collapsedSections.commits}"></i>
                     </div>
                     
-                    <div class="commits-list">
-                        <template x-for="commit in commits" :key="commit.id">
-                            <div class="commit-item" @click="viewCommit(commit)">
-                                <div class="flex items-start space-x-3">
-                                    <div class="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="font-medium text-sm truncate" x-text="commit.title"></div>
-                                        <div class="text-xs text-gray-400 mt-1">
-                                            <span x-text="commit.author_name"></span>
-                                            <span class="mx-1">•</span>
-                                            <span x-text="formatDate(commit.authored_date)"></span>
+                    <div class="section-content" :class="{'collapsed': collapsedSections.commits}">
+                        <!-- Branch Selector -->
+                        <div class="branch-selector">
+                            <select x-model="currentBranch" @change="switchBranch()" class="branch-dropdown">
+                                <template x-for="branch in branches" :key="branch.name">
+                                    <option :value="branch.name" x-text="branch.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                        
+                        <!-- Git Graph -->
+                        <div class="git-graph">
+                            <div class="branch-line">
+                                <div class="branch-dot branch-main"></div>
+                                <span x-text="currentBranch">main</span>
+                                <div class="branch-line-svg"></div>
+                                <span class="text-xs">HEAD</span>
+                            </div>
+                            <template x-for="branch in otherBranches" :key="branch.name">
+                                <div class="branch-line">
+                                    <div class="branch-dot" :class="getBranchClass(branch.type)"></div>
+                                    <span x-text="branch.name"></span>
+                                    <div class="branch-line-svg"></div>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <!-- Commit Timeline -->
+                        <div class="commit-timeline">
+                            <template x-for="commit in commits.slice(0, 10)" :key="commit.id">
+                                <div class="commit-item" @click="viewCommit(commit)">
+                                    <div class="commit-header">
+                                        <div class="commit-avatar" :class="getCommitAuthorClass(commit.author_name)">
+                                            <span x-text="getAuthorInitials(commit.author_name)"></span>
                                         </div>
-                                        <div class="text-xs text-gray-500 mt-1 font-mono" x-text="commit.short_id"></div>
+                                        <div class="commit-info">
+                                            <div class="commit-message" x-text="commit.title"></div>
+                                            <div class="commit-meta">
+                                                <span x-text="commit.author_name"></span>
+                                                <span>•</span>
+                                                <span x-text="formatDate(commit.authored_date)"></span>
+                                                <span class="font-mono text-xs" x-text="commit.short_id"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="commit-stats">
+                                        <div class="stat-item">
+                                            <i class="fas fa-file-alt"></i>
+                                            <span x-text="commit.files_changed || 0"></span>
+                                        </div>
+                                        <div class="stat-item stat-added">
+                                            <span>+<span x-text="commit.lines_added || 0"></span></span>
+                                        </div>
+                                        <div class="stat-item stat-removed">
+                                            <span>-<span x-text="commit.lines_deleted || 0"></span></span>
+                                        </div>
                                     </div>
                                 </div>
+                            </template>
+                        </div>
+                        
+                        <!-- Commit Stats -->
+                        <div class="stats-section">
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-value" x-text="commits.length"></div>
+                                    <div class="stat-label">Total Commits</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value" x-text="getUniqueAuthors().length"></div>
+                                    <div class="stat-label">Contributors</div>
+                                </div>
                             </div>
-                        </template>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Pull Requests Tab -->
-                <div x-show="activeTab === 'pullrequests'" class="tab-content">
-                    <div class="tab-header p-4 border-b border-gray-600">
-                        <h3 class="font-medium mb-2">Pull Requests</h3>
-                        <div class="flex space-x-2 text-sm">
-                            <button @click="prFilter = 'open'" 
-                                    :class="{'text-blue-400': prFilter === 'open', 'text-gray-400': prFilter !== 'open'}"
-                                    class="hover:text-blue-300">
-                                Open (<span x-text="pullRequests.filter(pr => pr.state === 'opened').length">0</span>)
-                            </button>
-                            <button @click="prFilter = 'merged'" 
-                                    :class="{'text-blue-400': prFilter === 'merged', 'text-gray-400': prFilter !== 'merged'}"
-                                    class="hover:text-blue-300">
-                                Merged (<span x-text="pullRequests.filter(pr => pr.state === 'merged').length">0</span>)
-                            </button>
+                <!-- Pull Requests Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" @click="toggleSection('pullrequests')" 
+                         :class="{'collapsed': collapsedSections.pullrequests}">
+                        <div class="flex items-center">
+                            <i class="section-icon fas fa-code-pull-request"></i>
+                            <span>PULL REQUESTS</span>
                         </div>
+                        <i class="expand-icon fas fa-chevron-down" 
+                           :class="{'collapsed': collapsedSections.pullrequests}"></i>
                     </div>
                     
-                    <div class="pr-list">
-                        <template x-for="pr in filteredPullRequests" :key="pr.id">
-                            <div class="commit-item" @click="viewPullRequest(pr)">
-                                <div class="flex items-start space-x-3">
-                                    <div :class="getPRIcon(pr.state)" class="mt-1 flex-shrink-0"></div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="font-medium text-sm truncate" x-text="pr.title"></div>
-                                        <div class="text-xs text-gray-400 mt-1">
-                                            <span x-text="pr.author.name"></span>
-                                            <span class="mx-1">•</span>
-                                            <span x-text="formatDate(pr.created_at)"></span>
-                                        </div>
-                                        <div class="text-xs text-gray-500 mt-1">
-                                            <span x-text="pr.source_branch"></span>
-                                            <i class="fas fa-arrow-right mx-1"></i>
-                                            <span x-text="pr.target_branch"></span>
+                    <div class="section-content" :class="{'collapsed': collapsedSections.pullrequests}">
+                        <!-- PR Filter -->
+                        <div class="pr-filter">
+                            <div class="pr-filter-buttons">
+                                <button @click="prFilter = 'all'" 
+                                        :class="{'active': prFilter === 'all'}" 
+                                        class="filter-btn">All</button>
+                                <button @click="prFilter = 'open'" 
+                                        :class="{'active': prFilter === 'open'}" 
+                                        class="filter-btn">Open</button>
+                                <button @click="prFilter = 'ready'" 
+                                        :class="{'active': prFilter === 'ready'}" 
+                                        class="filter-btn">Ready</button>
+                                <button @click="prFilter = 'draft'" 
+                                        :class="{'active': prFilter === 'draft'}" 
+                                        class="filter-btn">Draft</button>
+                            </div>
+                        </div>
+                        
+                        <!-- PR Groups -->
+                        <div class="pr-container">
+                            <!-- Pinned PRs -->
+                            <div x-show="getPinnedPRs().length > 0" class="pr-group">
+                                <div class="pr-group-header">
+                                    <i class="fas fa-thumbtack mr-2"></i>
+                                    Pinned (<span x-text="getPinnedPRs().length"></span>)
+                                </div>
+                                <template x-for="pr in getPinnedPRs()" :key="pr.id">
+                                    <div class="pr-item" :class="getPRClass(pr)" @click="viewPullRequest(pr)">
+                                        <div class="pr-header">
+                                            <div class="pr-status-icon" :class="getPRStatusClass(pr)">
+                                                <i :class="getPRStatusIcon(pr)"></i>
+                                            </div>
+                                            <div class="pr-content">
+                                                <div class="pr-title" x-text="pr.title"></div>
+                                                <div class="pr-meta">
+                                                    <span x-text="'#' + pr.id"></span>
+                                                    <span>•</span>
+                                                    <span x-text="pr.author?.name"></span>
+                                                    <span>•</span>
+                                                    <span x-text="formatDate(pr.created_at)"></span>
+                                                </div>
+                                                <div class="pr-status-bar">
+                                                    <span x-show="pr.approvals" 
+                                                          :class="getApprovalBadgeClass(pr)" 
+                                                          class="status-badge">
+                                                        <i class="fas fa-check mr-1"></i>
+                                                        <span x-text="pr.approvals + '/2 approvals'"></span>
+                                                    </span>
+                                                    <span x-show="pr.ci_status" 
+                                                          :class="getCIBadgeClass(pr)" 
+                                                          class="status-badge">
+                                                        <i :class="getCIIcon(pr)" class="mr-1"></i>
+                                                        <span x-text="pr.ci_status"></span>
+                                                    </span>
+                                                </div>
+                                                <div x-show="pr.labels && pr.labels.length" class="pr-labels">
+                                                    <template x-for="label in pr.labels" :key="label">
+                                                        <span :class="'label label-' + label" x-text="label"></span>
+                                                    </template>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
+                                </template>
+                            </div>
+                            
+                            <!-- Ready to Merge -->
+                            <div x-show="getReadyPRs().length > 0" class="pr-group">
+                                <div class="pr-group-header">
+                                    <i class="fas fa-code-merge mr-2"></i>
+                                    Ready to Merge (<span x-text="getReadyPRs().length"></span>)
+                                </div>
+                                <template x-for="pr in getReadyPRs()" :key="pr.id">
+                                    <div class="pr-item ready" @click="viewPullRequest(pr)">
+                                        <div class="pr-header">
+                                            <div class="pr-status-icon pr-status-ready">
+                                                <i class="fas fa-check"></i>
+                                            </div>
+                                            <div class="pr-content">
+                                                <div class="pr-title" x-text="pr.title"></div>
+                                                <div class="pr-meta" x-text="'#' + pr.id + ' • ' + pr.author?.name"></div>
+                                                <div class="pr-status-bar">
+                                                    <span class="status-badge badge-approved">All checks passed</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            
+                            <!-- Under Review -->
+                            <div x-show="getReviewPRs().length > 0" class="pr-group">
+                                <div class="pr-group-header">
+                                    <i class="fas fa-eye mr-2"></i>
+                                    Under Review (<span x-text="getReviewPRs().length"></span>)
+                                </div>
+                                <template x-for="pr in getReviewPRs().slice(0, 3)" :key="pr.id">
+                                    <div class="pr-item" @click="viewPullRequest(pr)">
+                                        <div class="pr-header">
+                                            <div class="pr-status-icon pr-status-review">
+                                                <i class="fas fa-eye"></i>
+                                            </div>
+                                            <div class="pr-content">
+                                                <div class="pr-title" x-text="pr.title"></div>
+                                                <div class="pr-meta" x-text="'#' + pr.id + ' • ' + pr.author?.name"></div>
+                                                <div class="pr-status-bar">
+                                                    <span class="status-badge badge-pending">Review pending</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        
+                        <!-- PR Stats -->
+                        <div class="stats-section">
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-value" x-text="pullRequests.length"></div>
+                                    <div class="stat-label">Total PRs</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-value" x-text="getReadyPRs().length"></div>
+                                    <div class="stat-label">Ready</div>
                                 </div>
                             </div>
-                        </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Insights Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" @click="toggleSection('insights')" 
+                         :class="{'collapsed': collapsedSections.insights}">
+                        <div class="flex items-center">
+                            <i class="section-icon fas fa-robot"></i>
+                            <span>AI INSIGHTS</span>
+                        </div>
+                        <i class="expand-icon fas fa-chevron-down" 
+                           :class="{'collapsed': collapsedSections.insights}"></i>
+                    </div>
+                    
+                    <div class="section-content" :class="{'collapsed': collapsedSections.insights}">
+                        <div class="p-4 text-center text-gray-400 text-sm">
+                            <i class="fas fa-lightbulb text-2xl mb-2"></i>
+                            <p>AI insights will appear here after analysis</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -959,6 +1707,7 @@
                 fileTree: [],
                 filteredFiles: [],
                 fileSearch: '',
+                globalSearch: '',
                 selectedFile: null,
                 fileSize: '',
                 commits: [],
@@ -967,13 +1716,25 @@
                 loadingMessage: 'Loading...',
                 hasChanges: false,
                 
-                // UI State
+                // Enhanced UI State
                 activeTab: 'files',
                 bottomTab: 'analysis',
                 showBottomPanel: false,
-                prFilter: 'open',
+                prFilter: 'all',
                 analysisType: null,
                 analysisStep: 1,
+                
+                // Collapsible sections state
+                collapsedSections: {
+                    files: false,
+                    commits: false,
+                    pullrequests: false,
+                    insights: true
+                },
+                
+                // Enhanced file tree state
+                expandedFolders: new Set(),
+                otherBranches: [],
                 
                 // Progress tracking
                 analysisProgress: 0,
@@ -994,6 +1755,9 @@
                 
                 // Fix application flag to prevent infinite loops
                 _isApplyingFix: false,
+                
+                // Diff decorations storage
+                _diffDecorations: [],
                 
                 init() {
                     console.log('=== Repository Browser Initializing ===');
@@ -1053,14 +1817,63 @@
                     try {
                         const response = await fetch(`/gitlab/repository/${this.projectId}/tree?branch=${this.currentBranch}&path=${path}`);
                         const data = await response.json();
-                        this.fileTree = data.items.sort((a, b) => {
+                        
+                        // Process files with enhanced metadata
+                        const processedFiles = data.items.map(item => ({
+                            ...item,
+                            depth: 0,
+                            expanded: false,
+                            hasIssues: Math.random() < 0.3, // Simulate files with issues
+                            isModified: Math.random() < 0.2, // Simulate modified files
+                            isNew: Math.random() < 0.1 // Simulate new files
+                        })).sort((a, b) => {
                             if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
                             return a.name.localeCompare(b.name);
                         });
-                        this.filteredFiles = this.fileTree;
+                        
+                        if (path === '') {
+                            // Root level - replace entire tree
+                            this.fileTree = processedFiles;
+                        } else {
+                            // Subdirectory - merge with existing tree
+                            this.fileTree = [...this.fileTree, ...processedFiles];
+                        }
+                        
+                        this.updateFileTreeDisplay();
                         this.currentPath = path;
                     } catch (error) {
                         console.error('Error loading file tree:', error);
+                    }
+                },
+                
+                async loadSubdirectory(path) {
+                    try {
+                        const response = await fetch(`/gitlab/repository/${this.projectId}/tree?branch=${this.currentBranch}&path=${path}`);
+                        const data = await response.json();
+                        
+                        // Process subdirectory files
+                        const subFiles = data.items.map(item => ({
+                            ...item,
+                            depth: path.split('/').length,
+                            expanded: false,
+                            hasIssues: Math.random() < 0.3,
+                            isModified: Math.random() < 0.2,
+                            isNew: Math.random() < 0.1
+                        })).sort((a, b) => {
+                            if (a.type !== b.type) return a.type === 'tree' ? -1 : 1;
+                            return a.name.localeCompare(b.name);
+                        });
+                        
+                        // Add to file tree if not already present
+                        subFiles.forEach(subFile => {
+                            if (!this.fileTree.find(f => f.path === subFile.path)) {
+                                this.fileTree.push(subFile);
+                            }
+                        });
+                        
+                        this.updateFileTreeDisplay();
+                    } catch (error) {
+                        console.error('Error loading subdirectory:', error);
                     }
                 },
                 
@@ -1076,27 +1889,92 @@
                 
                 async loadPullRequests() {
                     try {
-                        // For now, using mock data - replace with actual GitLab API
+                        // For now, using enhanced mock data - replace with actual GitLab API
                         this.pullRequests = [
                             {
-                                id: 1,
-                                title: 'Feature: Add user authentication',
+                                id: 123,
+                                title: 'Critical Security Fix for Authentication',
                                 state: 'opened',
-                                author: { name: 'John Doe' },
-                                created_at: new Date().toISOString(),
-                                source_branch: 'feature/auth',
-                                target_branch: 'main'
+                                author: { name: 'Alice Johnson' },
+                                created_at: new Date(Date.now() - 2 * 3600000).toISOString(), // 2 hours ago
+                                source_branch: 'hotfix/security-auth',
+                                target_branch: 'main',
+                                approvals: 2,
+                                ci_status: 'passed',
+                                urgent: true,
+                                pinned: true,
+                                labels: ['security', 'hotfix']
                             },
                             {
-                                id: 2,
-                                title: 'Fix: Memory leak in background worker',
-                                state: 'merged',
-                                author: { name: 'Jane Smith' },
-                                created_at: new Date(Date.now() - 86400000).toISOString(),
-                                source_branch: 'fix/memory-leak',
-                                target_branch: 'main'
+                                id: 120,
+                                title: 'Feature: User Dashboard with Analytics',
+                                state: 'draft',
+                                author: { name: 'You' },
+                                created_at: new Date(Date.now() - 24 * 3600000).toISOString(), // 1 day ago
+                                source_branch: 'feature/user-dashboard',
+                                target_branch: 'main',
+                                approvals: 0,
+                                ci_status: 'failed',
+                                labels: ['feature', 'frontend']
+                            },
+                            {
+                                id: 119,
+                                title: 'Fix database connection pooling issue',
+                                state: 'opened',
+                                author: { name: 'Bob Smith' },
+                                created_at: new Date(Date.now() - 8 * 3600000).toISOString(), // 8 hours ago
+                                source_branch: 'fix/db-pooling',
+                                target_branch: 'main',
+                                approvals: 2,
+                                ci_status: 'passed',
+                                labels: ['bugfix']
+                            },
+                            {
+                                id: 118,
+                                title: 'Update API documentation for v2 endpoints',
+                                state: 'opened',
+                                author: { name: 'Carol Davis' },
+                                created_at: new Date(Date.now() - 12 * 3600000).toISOString(), // 12 hours ago
+                                source_branch: 'docs/api-v2',
+                                target_branch: 'main',
+                                approvals: 2,
+                                ci_status: 'passed',
+                                labels: ['documentation']
+                            },
+                            {
+                                id: 117,
+                                title: 'Optimize API performance for large datasets',
+                                state: 'opened',
+                                author: { name: 'Dave Wilson' },
+                                created_at: new Date(Date.now() - 36 * 3600000).toISOString(), // 1.5 days ago
+                                source_branch: 'optimize/api-performance',
+                                target_branch: 'main',
+                                approvals: 1,
+                                ci_status: 'running',
+                                labels: ['performance']
+                            },
+                            {
+                                id: 115,
+                                title: 'Add user permissions and role management',
+                                state: 'opened',
+                                author: { name: 'Eve Brown' },
+                                created_at: new Date(Date.now() - 72 * 3600000).toISOString(), // 3 days ago
+                                source_branch: 'feature/user-permissions',
+                                target_branch: 'main',
+                                approvals: 0,
+                                ci_status: 'failed',
+                                conflicts: true,
+                                labels: ['feature', 'security']
                             }
                         ];
+                        
+                        // Simulate loading other branches for git graph
+                        this.otherBranches = [
+                            { name: 'feature/user-dashboard', type: 'feature' },
+                            { name: 'hotfix/security-auth', type: 'hotfix' },
+                            { name: 'optimize/api-performance', type: 'feature' }
+                        ];
+                        
                     } catch (error) {
                         console.error('Error loading pull requests:', error);
                     }
@@ -1577,51 +2455,176 @@
                     }
                     
                     try {
-                        console.log('Applying fix to line:', result.lineNumber);
+                        console.log('Applying fix:', result);
                         
                         const editor = Alpine.raw(this.monacoEditor);
+                        const model = editor.getModel();
                         
                         // CRITICAL: Temporarily disable change tracking to prevent infinite loop
                         this._isApplyingFix = true;
                         
-                        // Get line number - use it directly from the API
-                        let lineNum = parseInt(result.lineNumber) || 1;
+                        // Step 1: Find the old content location
+                        const location = this.findBestMatchLocation(model, result.oldContent, result.lineNumber);
                         
-                        // Ensure it's a valid line number
-                        const totalLines = editor.getModel().getLineCount();
-                        if (lineNum < 1 || lineNum > totalLines) {
-                            lineNum = 1;
+                        if (!location.found && !result.oldContent) {
+                            // If no old content specified, use line number directly
+                            location.startLine = parseInt(result.lineNumber) || 1;
+                            location.endLine = location.startLine;
+                            location.found = true;
                         }
                         
-                        console.log('Target line:', lineNum, 'Total lines:', totalLines);
+                        if (!location.found) {
+                            this.showNotification('warning', 'Could not find exact code location. Using suggested line.');
+                            location.startLine = parseInt(result.lineNumber) || 1;
+                            location.endLine = location.startLine;
+                        }
                         
-                        // Get current line content
-                        const currentLine = editor.getModel().getLineContent(lineNum);
-                        console.log('Current line content:', currentLine);
+                        console.log('Replacement location:', location);
                         
-                        // Replace the entire line with the suggested fix
-                        const range = new monaco.Range(lineNum, 1, lineNum, currentLine.length + 1);
+                        // Step 2: Show diff preview before applying
+                        this.showDiffPreview(editor, location, result.oldContent, result.suggestedFix);
                         
-                        // Apply the fix
-                        editor.executeEdits('ai-fix', [{
-                            range: range,
-                            text: result.suggestedFix
-                        }]);
-                        
-                        // Move cursor to the fixed line
-                        editor.setPosition({ lineNumber: lineNum, column: 1 });
-                        editor.revealLineInCenter(lineNum);
-                        
-                        // Re-enable change tracking
-                        this._isApplyingFix = false;
-                        
-                        console.log('Fix applied successfully');
-                        this.showNotification('success', `Fix applied at line ${lineNum}`);
+                        // Step 3: Apply the fix after a short delay to show diff
+                        setTimeout(() => {
+                            this.applyFixToEditor(editor, location, result.suggestedFix);
+                            this._isApplyingFix = false;
+                            
+                            console.log('Fix applied successfully');
+                            this.showNotification('success', `Fix applied at lines ${location.startLine}-${location.endLine}`);
+                        }, 1500); // 1.5 second delay to show diff preview
                         
                     } catch (error) {
-                        this._isApplyingFix = false; // Ensure we re-enable tracking even on error
+                        this._isApplyingFix = false;
                         console.error('Error applying fix:', error);
                         this.showNotification('error', `Error: ${error.message}`);
+                    }
+                },
+                
+                findBestMatchLocation(model, oldContent, lineNumber) {
+                    if (!oldContent || oldContent.trim() === '') {
+                        return { found: false };
+                    }
+                    
+                    const totalLines = model.getLineCount();
+                    const oldLines = oldContent.split('\n');
+                    const firstOldLine = oldLines[0].trim();
+                    
+                    // Start search from suggested line
+                    const searchStart = Math.max(1, parseInt(lineNumber) - 3);
+                    const searchEnd = Math.min(totalLines, parseInt(lineNumber) + 10);
+                    
+                    // Try to find exact match
+                    for (let i = searchStart; i <= searchEnd; i++) {
+                        const currentLine = model.getLineContent(i).trim();
+                        if (currentLine === firstOldLine || currentLine.includes(firstOldLine)) {
+                            // Found potential match, check if multi-line content matches
+                            let endLine = i;
+                            let allMatch = true;
+                            
+                            for (let j = 1; j < oldLines.length && (i + j) <= totalLines; j++) {
+                                const nextLine = model.getLineContent(i + j).trim();
+                                const expectedLine = oldLines[j].trim();
+                                if (nextLine === expectedLine || nextLine.includes(expectedLine)) {
+                                    endLine = i + j;
+                                } else {
+                                    allMatch = false;
+                                    break;
+                                }
+                            }
+                            
+                            if (allMatch || oldLines.length === 1) {
+                                return {
+                                    found: true,
+                                    startLine: i,
+                                    endLine: endLine
+                                };
+                            }
+                        }
+                    }
+                    
+                    return { found: false };
+                },
+                
+                showDiffPreview(editor, location, oldContent, newContent) {
+                    try {
+                        // Create diff decorations
+                        const decorations = [];
+                        
+                        // Red highlight for old content (to be removed)
+                        if (oldContent && location.found) {
+                            decorations.push({
+                                range: new monaco.Range(location.startLine, 1, location.endLine, editor.getModel().getLineMaxColumn(location.endLine)),
+                                options: {
+                                    className: 'diff-removed',
+                                    glyphMarginClassName: 'diff-removed-glyph',
+                                    overviewRuler: {
+                                        color: '#ff6b6b',
+                                        position: monaco.editor.OverviewRulerLane.Left
+                                    }
+                                }
+                            });
+                        }
+                        
+                        // Store decorations for cleanup
+                        this._diffDecorations = editor.deltaDecorations([], decorations);
+                        
+                        // Scroll to the change location
+                        editor.revealRangeInCenter(new monaco.Range(location.startLine, 1, location.endLine, 1));
+                        
+                        console.log('Diff preview shown - applying fix in 1.5 seconds...');
+                        
+                    } catch (error) {
+                        console.warn('Could not show diff preview:', error);
+                    }
+                },
+                
+                applyFixToEditor(editor, location, newContent) {
+                    try {
+                        // Clear previous diff decorations
+                        if (this._diffDecorations) {
+                            editor.deltaDecorations(this._diffDecorations, []);
+                        }
+                        
+                        // Create range for replacement
+                        const range = new monaco.Range(
+                            location.startLine, 1,
+                            location.endLine, editor.getModel().getLineMaxColumn(location.endLine)
+                        );
+                        
+                        // Apply the replacement
+                        editor.executeEdits('ai-fix', [{
+                            range: range,
+                            text: newContent
+                        }]);
+                        
+                        // Calculate new range after replacement
+                        const newLines = newContent.split('\n');
+                        const newEndLine = location.startLine + newLines.length - 1;
+                        const newRange = new monaco.Range(
+                            location.startLine, 1,
+                            newEndLine, newLines[newLines.length - 1].length + 1
+                        );
+                        
+                        // Green highlight for new content (added)
+                        const addedDecorations = editor.deltaDecorations([], [{
+                            range: newRange,
+                            options: {
+                                className: 'diff-added',
+                                glyphMarginClassName: 'diff-added-glyph'
+                            }
+                        }]);
+                        
+                        // Remove added highlight after 3 seconds
+                        setTimeout(() => {
+                            editor.deltaDecorations(addedDecorations, []);
+                        }, 3000);
+                        
+                        // Position cursor at the end of the applied fix
+                        editor.setPosition({ lineNumber: newEndLine, column: newLines[newLines.length - 1].length + 1 });
+                        
+                    } catch (error) {
+                        console.error('Error applying fix to editor:', error);
+                        throw error;
                     }
                 },
                 
@@ -2128,35 +3131,231 @@
                 // Test function for debugging Apply Fix
                 testApplyFix() {
                     try {
-                        console.log('Step 1: Starting test...');
+                        console.log('=== Testing enhanced Apply Fix with diff visualization ===');
+                        
+                        if (!this.monacoEditor) {
+                            console.error('Monaco editor not available');
+                            this.showNotification('error', 'Monaco editor not ready');
+                            return;
+                        }
                         
                         const editor = Alpine.raw(this.monacoEditor);
                         const model = editor.getModel();
+                        
+                        console.log('Step 1: Getting current line content...');
                         const line1Content = model.getLineContent(1);
+                        console.log('Current line 1:', line1Content);
                         
-                        console.log('Step 2: Temporarily disabling change tracking...');
-                        this._isApplyingFix = true;
+                        // Create a test result object similar to what AI would return
+                        const testResult = {
+                            id: 'test-fix',
+                            title: 'Test Fix Application',
+                            description: 'Testing enhanced fix application with diff visualization',
+                            severity: 'medium',
+                            category: 'testing',
+                            oldContent: line1Content, // Use actual current content
+                            suggestedFix: '# ENHANCED TEST FIX APPLIED - Shows diff visualization!',
+                            lineNumber: 1
+                        };
                         
-                        console.log('Step 3: Creating Monaco Range...');
-                        const range = new monaco.Range(1, 1, 1, line1Content.length + 1);
+                        console.log('Step 2: Testing diff-aware apply fix...');
+                        console.log('Test result:', testResult);
                         
-                        console.log('Step 4: Applying test edit...');
-                        editor.executeEdits('test-edit', [{
-                            range: range,
-                            text: '# TEST FIX APPLIED SUCCESSFULLY!'
-                        }]);
+                        // Test the enhanced applyFix function
+                        this.applyFix(testResult);
                         
-                        console.log('Step 5: Re-enabling change tracking...');
-                        this._isApplyingFix = false;
-                        
-                        console.log('All tests passed! Apply Fix should work.');
-                        this.showNotification('success', 'Test completed - Apply Fix should now work!');
+                        this.showNotification('info', 'Testing enhanced Apply Fix - watch for red→green diff highlights!');
                         
                     } catch (error) {
-                        this._isApplyingFix = false; // Ensure we re-enable tracking
-                        console.error('Test failed:', error);
-                        this.showNotification('error', 'Test failed: ' + error.message);
+                        console.error('Enhanced test failed:', error);
+                        this.showNotification('error', 'Enhanced test failed: ' + error.message);
                     }
+                },
+                
+                // UI State management
+                toggleSection(sectionName) {
+                    this.collapsedSections[sectionName] = !this.collapsedSections[sectionName];
+                },
+                
+                // Enhanced file tree management
+                handleFileClick(item) {
+                    if (item.type === 'tree') {
+                        this.toggleFileTreeItem(item);
+                    } else {
+                        this.selectFile(item);
+                    }
+                },
+                
+                toggleFileTreeItem(item) {
+                    if (this.expandedFolders.has(item.path)) {
+                        this.expandedFolders.delete(item.path);
+                        item.expanded = false;
+                    } else {
+                        this.expandedFolders.add(item.path);
+                        item.expanded = true;
+                        // Load subdirectory if not loaded
+                        if (!item.children) {
+                            this.loadSubdirectory(item.path);
+                        }
+                    }
+                    this.updateFileTreeDisplay();
+                },
+                
+                updateFileTreeDisplay() {
+                    // Convert flat file list to hierarchical structure with proper depth
+                    this.filteredFiles = this.buildHierarchicalTree(this.fileTree);
+                },
+                
+                buildHierarchicalTree(files, parentPath = '', depth = 0) {
+                    const result = [];
+                    const pathParts = parentPath.split('/').filter(p => p);
+                    
+                    files.forEach(file => {
+                        if (parentPath === '' || file.path.startsWith(parentPath + '/')) {
+                            const relativePath = parentPath === '' ? file.path : file.path.substring(parentPath.length + 1);
+                            const isDirectChild = !relativePath.includes('/');
+                            
+                            if (isDirectChild) {
+                                file.depth = depth;
+                                file.expanded = this.expandedFolders.has(file.path);
+                                result.push(file);
+                                
+                                // Add children if folder is expanded
+                                if (file.type === 'tree' && file.expanded) {
+                                    const children = this.buildHierarchicalTree(files, file.path, depth + 1);
+                                    result.push(...children);
+                                }
+                            }
+                        }
+                    });
+                    
+                    return result;
+                },
+                
+                // File status helpers
+                getFileStatus(item) {
+                    if (item.hasIssues) return '!';
+                    if (item.isModified) return 'M';
+                    if (item.isNew) return '+';
+                    if (this.selectedFile?.path === item.path) return '●';
+                    return '';
+                },
+                
+                getFileStatusClass(item) {
+                    if (item.hasIssues) return 'status-issues';
+                    if (item.isModified) return 'status-modified';
+                    if (item.isNew) return 'status-new';
+                    if (this.selectedFile?.path === item.path) return 'status-selected';
+                    return '';
+                },
+                
+                // Global search functionality
+                performGlobalSearch() {
+                    if (!this.globalSearch.trim()) {
+                        this.filteredFiles = this.fileTree;
+                        return;
+                    }
+                    
+                    const searchTerm = this.globalSearch.toLowerCase();
+                    this.filteredFiles = this.fileTree.filter(item => 
+                        item.name.toLowerCase().includes(searchTerm) ||
+                        item.path.toLowerCase().includes(searchTerm)
+                    );
+                },
+                
+                // Enhanced commit helpers
+                getCommitAuthorClass(authorName) {
+                    // Determine if commit is from current user, team, or external
+                    if (authorName === 'You' || authorName === this.currentUserName) {
+                        return 'commit-author-you';
+                    } else if (this.teamMembers && this.teamMembers.includes(authorName)) {
+                        return 'commit-author-team';
+                    } else {
+                        return 'commit-author-external';
+                    }
+                },
+                
+                getAuthorInitials(authorName) {
+                    if (!authorName) return '?';
+                    const parts = authorName.split(' ');
+                    if (parts.length >= 2) {
+                        return (parts[0][0] + parts[1][0]).toUpperCase();
+                    }
+                    return authorName.substring(0, 2).toUpperCase();
+                },
+                
+                getBranchClass(branchType) {
+                    switch (branchType) {
+                        case 'main': return 'branch-main';
+                        case 'feature': return 'branch-feature';
+                        case 'hotfix': return 'branch-hotfix';
+                        default: return 'branch-feature';
+                    }
+                },
+                
+                getUniqueAuthors() {
+                    const authors = new Set();
+                    this.commits.forEach(commit => {
+                        if (commit.author_name) {
+                            authors.add(commit.author_name);
+                        }
+                    });
+                    return Array.from(authors);
+                },
+                
+                // Enhanced PR helpers
+                getPinnedPRs() {
+                    return this.pullRequests.filter(pr => pr.pinned || pr.urgent);
+                },
+                
+                getReadyPRs() {
+                    return this.pullRequests.filter(pr => 
+                        pr.state === 'opened' && 
+                        pr.approvals >= 2 && 
+                        pr.ci_status === 'passed'
+                    );
+                },
+                
+                getReviewPRs() {
+                    return this.pullRequests.filter(pr => 
+                        pr.state === 'opened' && 
+                        (!pr.approvals || pr.approvals < 2)
+                    );
+                },
+                
+                getPRClass(pr) {
+                    if (pr.urgent) return 'urgent';
+                    if (pr.state === 'draft') return 'draft';
+                    if (this.getReadyPRs().includes(pr)) return 'ready';
+                    return '';
+                },
+                
+                getPRStatusClass(pr) {
+                    if (pr.urgent) return 'pr-status-urgent';
+                    if (pr.state === 'draft') return 'pr-status-draft';
+                    if (this.getReadyPRs().includes(pr)) return 'pr-status-ready';
+                    return 'pr-status-review';
+                },
+                
+                getPRStatusIcon(pr) {
+                    if (pr.urgent) return 'fas fa-exclamation';
+                    if (pr.state === 'draft') return 'fas fa-edit';
+                    if (this.getReadyPRs().includes(pr)) return 'fas fa-check';
+                    return 'fas fa-eye';
+                },
+                
+                getApprovalBadgeClass(pr) {
+                    if (pr.approvals >= 2) return 'badge-approved';
+                    if (pr.approvals >= 1) return 'badge-changes';
+                    return 'badge-pending';
+                },
+                
+                getCIBadgeClass(pr) {
+                    return pr.ci_status === 'passed' ? 'badge-passing' : 'badge-failing';
+                },
+                
+                getCIIcon(pr) {
+                    return pr.ci_status === 'passed' ? 'fas fa-check' : 'fas fa-times';
                 }
             }
         }
