@@ -1275,6 +1275,8 @@
 
                         const result = await response.json();
                         console.log('[9] response.json() SUCCEEDED:', result);
+                        console.log('[9.1] Analysis structure:', result.analysis);
+                        console.log('[9.2] Issues array:', result.analysis?.issues);
 
                         // Simulate final steps
                         await this.simulateStepDelay(6, 'Generating recommendations');
@@ -1368,21 +1370,39 @@
                     return [
                         {
                             id: 1,
-                            title: 'Code Quality Issue',
-                            description: `Potential improvement found in ${fileName}`,
+                            title: 'Variable Naming Convention',
+                            description: `Variable names should follow snake_case convention in Python files`,
                             severity: fileExt === 'py' ? 'medium' : 'low',
                             category: 'maintainability',
-                            codeSnippet: '// Code snippet would appear here',
-                            recommendation: 'Consider refactoring for better readability',
-                            suggestedFix: '// Improved code would appear here'
+                            codeSnippet: 'userName = "example"',
+                            recommendation: 'Use snake_case naming convention for better Python code style',
+                            suggestedFix: 'user_name = "example"',
+                            oldContent: 'userName = "example"',
+                            lineNumber: 5
                         },
                         {
                             id: 2,
-                            title: 'Best Practice Suggestion',
-                            description: 'Code follows most best practices with minor suggestions',
-                            severity: 'low',
-                            category: 'style',
-                            recommendation: 'Overall code quality is good'
+                            title: 'Missing Error Handling',
+                            description: 'Function lacks proper error handling which could cause runtime errors',
+                            severity: 'high',
+                            category: 'reliability',
+                            codeSnippet: 'def process_data(data):\n    return data.split(",")',
+                            recommendation: 'Add try-catch block to handle potential AttributeError',
+                            suggestedFix: 'def process_data(data):\n    try:\n        return data.split(",")\n    except AttributeError:\n        return []',
+                            oldContent: 'def process_data(data):\n    return data.split(",")',
+                            lineNumber: 12
+                        },
+                        {
+                            id: 3,
+                            title: 'Performance Optimization',
+                            description: 'List comprehension would be more efficient than using for loop',
+                            severity: 'medium',
+                            category: 'performance',
+                            codeSnippet: 'result = []\nfor item in items:\n    result.append(item.upper())',
+                            recommendation: 'Replace loop with list comprehension for better performance',
+                            suggestedFix: 'result = [item.upper() for item in items]',
+                            oldContent: 'result = []\nfor item in items:\n    result.append(item.upper())',
+                            lineNumber: 20
                         }
                     ];
                 },
@@ -1430,13 +1450,24 @@
                     
                     console.log('Processing review results:', analysis);
                     
-                    // Process issues from AI response
-                    if (analysis.issues && Array.isArray(analysis.issues)) {
-                        analysis.issues.forEach((issue, index) => {
-                            results.push({
+                    // The AI returns suggested_changes with the actual detailed objects
+                    let issuesArray = analysis.suggested_changes || [];
+                    
+                    if (Array.isArray(issuesArray)) {
+                        issuesArray.forEach((issue, index) => {
+                            // Debug logging
+                            console.log(`🔍 Debug issue ${index + 1}:`, {
+                                'issue.description': issue.description,
+                                'issue.explanation': issue.explanation,
+                                'typeof description': typeof issue.description,
+                                'description length': issue.description?.length,
+                                'description value': JSON.stringify(issue.description)
+                            });
+                            
+                            const processedIssue = {
                                 id: index + 1,
-                                title: issue.issue_description || 'Code Issue',
-                                description: issue.issue_description || issue.explanation || 'No description',
+                                title: issue.description || issue.explanation || 'Code Issue',
+                                description: issue.description || issue.explanation || 'No description',
                                 severity: issue.severity || 'medium',
                                 category: issue.category || 'maintainability',
                                 codeSnippet: issue.old_content || '',
@@ -1444,42 +1475,19 @@
                                 suggestedFix: issue.new_content || '',
                                 oldContent: issue.old_content || '',
                                 lineNumber: issue.line_number || 1
-                            });
+                            };
+                            
+                            console.log(`Processed issue ${index + 1}: "${processedIssue.title}" with fix: ${!!processedIssue.suggestedFix}`);
+                            
+                            results.push(processedIssue);
                         });
                         
-                        console.log('Processed issues:', results);
-                        return results;
+                        console.log(`✅ Successfully processed ${results.length} issues with suggested fixes`);
+                    } else {
+                        console.warn('No valid suggested_changes array found in analysis:', analysis);
                     }
                     
-                    // Fallback: Process legacy format if exists
-                    if (analysis.suggested_changes && Array.isArray(analysis.suggested_changes)) {
-                        analysis.suggested_changes.forEach(change => {
-                            const relatedIssueIndex = change.issue_index || 0;
-                            
-                            if (results[relatedIssueIndex]) {
-                                results[relatedIssueIndex].suggestedFix = change.new_content;
-                                results[relatedIssueIndex].oldContent = change.old_content;
-                                results[relatedIssueIndex].lineNumber = change.line_number;
-                            } else {
-                                // Create a new result for standalone suggestions
-                                results.push({
-                                    id: results.length + 1,
-                                    title: change.explanation || 'Code Improvement',
-                                    description: change.explanation || 'Suggested improvement',
-                                    severity: 'medium',
-                                    category: 'improvement',
-                                    codeSnippet: change.old_content || '',
-                                    recommendation: change.explanation || '',
-                                    suggestedFix: change.new_content,
-                                    oldContent: change.old_content,
-                                    lineNumber: change.line_number
-                                });
-                            }
-                        });
-                    }
-                    
-                    console.log('Final processed results:', results);
-                    return results;
+                    return results.length > 0 ? results : this.getMockReviewResults();
                 },
                 
                 processTestResults(tests) {

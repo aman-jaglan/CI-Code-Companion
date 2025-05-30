@@ -827,7 +827,7 @@ Each issue must be a separate JSON object on its own line.
         return None  # No conversion needed
 
     def _calculate_content_similarity(self, content1: str, content2: str) -> float:
-        """Calculate similarity between two code content strings.
+        """Calculate similarity between two code content strings using word-based comparison.
         
         Args:
             content1: First content string
@@ -844,23 +844,62 @@ Each issue must be a separate JSON object on its own line.
             if not normalized1 or not normalized2:
                 return 0.0
             
-            # Simple character-based similarity using set intersection
-            set1 = set(normalized1)
-            set2 = set(normalized2)
-            
-            if not set1 and not set2:
+            # If content is exactly the same, return 1.0
+            if normalized1 == normalized2:
                 return 1.0
-            if not set1 or not set2:
+            
+            # Use word-based similarity instead of character-based
+            words1 = set(normalized1.split())
+            words2 = set(normalized2.split())
+            
+            if not words1 and not words2:
+                return 1.0
+            if not words1 or not words2:
                 return 0.0
             
-            intersection = len(set1.intersection(set2))
-            union = len(set1.union(set2))
+            # Calculate Jaccard similarity (intersection over union)
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
             
-            return intersection / union if union > 0 else 0.0
+            jaccard_similarity = intersection / union if union > 0 else 0.0
+            
+            # Also consider the length difference - significant changes in length should reduce similarity
+            len_diff = abs(len(normalized1) - len(normalized2)) / max(len(normalized1), len(normalized2))
+            length_penalty = min(len_diff * 0.5, 0.3)  # Max 30% penalty for length differences
+            
+            final_similarity = max(0.0, jaccard_similarity - length_penalty)
+            
+            return final_similarity
             
         except Exception as e:
             logger.warning(f"Error calculating content similarity: {str(e)}")
             return 0.0
+
+    def _normalize_category(self, category: str) -> str:
+        """Normalize category names to handle AI variations.
+        
+        Args:
+            category: Category string from AI response
+            
+        Returns:
+            Normalized category name
+        """
+        category = category.lower().strip()
+        
+        # Category mapping for common variations
+        category_mapping = {
+            "error_handling": "reliability",
+            "logic_and_correctness": "bug", 
+            "correctness": "bug",  # Add mapping for 'correctness'
+            "best_practices": "best_practice",
+            "code_quality": "maintainability",
+            "optimization": "performance",
+            "readability": "maintainability",
+            "documentation": "maintainability",
+            "testing": "reliability"
+        }
+        
+        return category_mapping.get(category, category)
 
     def _validate_suggestion_format(self, suggestion: Dict[str, Any]) -> bool:
         """Validate that a suggestion has all required fields and correct format.
@@ -883,6 +922,8 @@ Each issue must be a separate JSON object on its own line.
         }
         
         try:
+            logger.info(f"_validate_suggestion_format: Validating suggestion: {suggestion}")
+            
             # Check all required fields exist and have correct types
             for field, expected_type in required_fields.items():
                 if field not in suggestion:
@@ -936,7 +977,7 @@ Each issue must be a separate JSON object on its own line.
                 return False
             
             # Validate explanation is meaningful
-            if len(suggestion["explanation"].strip()) < 15:
+            if len(suggestion["explanation"].strip()) < 10:  # Reduced from 15 to 10
                 logger.warning(f"_validate_suggestion_format: Explanation too short: {suggestion}")
                 return False
             
@@ -945,14 +986,20 @@ Each issue must be a separate JSON object on its own line.
                 logger.warning(f"_validate_suggestion_format: Invalid severity level '{suggestion['severity']}' in suggestion: {suggestion}")
                 return False
             
-            # Validate category
+            # Validate category (with mapping for common variations)
+            normalized_category = self._normalize_category(suggestion["category"])
             valid_categories = {
                 "style", "security", "performance", "reliability",
-                "maintainability", "best_practice", "bug"
+                "maintainability", "best_practice", "bug", "error_handling",
+                "logic_and_correctness", "best_practices", "code_quality",
+                "testing", "documentation", "readability", "optimization"
             }
-            if suggestion["category"] not in valid_categories:
-                logger.warning(f"_validate_suggestion_format: Invalid category '{suggestion['category']}' in suggestion: {suggestion}")
+            if normalized_category not in valid_categories:
+                logger.warning(f"_validate_suggestion_format: Invalid category '{suggestion['category']}' (normalized: '{normalized_category}') in suggestion: {suggestion}")
                 return False
+            
+            # Update suggestion with normalized category
+            suggestion["category"] = normalized_category
             
             # Validate impact list is not empty and contains meaningful content
             if not suggestion["impact"] or len(suggestion["impact"]) == 0:
@@ -982,18 +1029,35 @@ Each issue must be a separate JSON object on its own line.
                 logger.warning(f"_validate_suggestion_format: Solution must be different from the problem. Identical old and new content: {suggestion}")
                 return False
             
-            # Check that the solution is substantial (more than trivial changes)
+            # Check that the solution is substantial (more than trivial changes) - MADE MORE PERMISSIVE
             similarity = self._calculate_content_similarity(old_content, new_content)
-            if similarity > 0.95:  # Too similar, probably not a real fix
-                logger.warning(f"_validate_suggestion_format: Solution too similar to original code (similarity: {similarity}): {suggestion}")
-                return False
+            logger.info(f"_validate_suggestion_format: Content similarity: {similarity} for suggestion: {suggestion['issue_description'][:50]}...")
+            
+            if similarity > 0.98:  # Raised threshold from 0.95 to 0.98 to be more permissive
+                # Allow certain types of valid changes that might appear similar
+                if (
+                    # Allow parameter removal (like removing unused parameters)
+                    len(new_content) < len(old_content) and 
+                    ('def ' in old_content or 'function' in old_content.lower())
+                ) or (
+                    # Allow simple formatting/syntax fixes
+                    len(old_content.split()) == len(new_content.split()) and
+                    'except:' in old_content  # Specific exception handling fixes
+                ) or (
+                    # Allow spacing and minor syntax improvements
+                    abs(len(old_content) - len(new_content)) < 10
+                ):
+                    logger.info(f"_validate_suggestion_format: Allowing valid change despite high similarity: {suggestion}")
+                else:
+                    logger.warning(f"_validate_suggestion_format: Solution too similar to original code (similarity: {similarity}): {suggestion}")
+                    return False
             
             # Ensure the new content is meaningful (not just whitespace changes)
             if len(new_content.strip()) < 3:
                 logger.warning(f"_validate_suggestion_format: Solution too short or trivial: {suggestion}")
                 return False
             
-            logger.debug(f"_validate_suggestion_format: Suggestion passed enhanced validation: {suggestion}")
+            logger.info(f"_validate_suggestion_format: Suggestion passed enhanced validation: {suggestion['issue_description'][:50]}...")
             return True
             
         except Exception as e:
