@@ -1048,8 +1048,10 @@
                             language: languageForPayload
                         };
                         console.log('[6.1] API Request Body OBJECT:', apiRequestBody);
+                        console.log('[6.2] Language in request:', apiRequestBody.language);
                         const jsonString = JSON.stringify(apiRequestBody);
-                        console.log('[6.2] Stringified request body:', jsonString);
+                        console.log('[6.3] Stringified request body:', jsonString);
+                        console.log('[6.4] Language in stringified request:', JSON.parse(jsonString).language);
 
                         const response = await fetch('/api/ai-analyze', {
                             method: 'POST',

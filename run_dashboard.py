@@ -116,16 +116,15 @@ def create_app():
 
             app.logger.info(f"Analysis params: action={action}, file_path={file_path}, project_id={project_id}, branch={branch}, language='{language_from_request}', content_length={len(content) if content else 0}")
             
-            required_params = {'action': action, 'file_path': file_path, 'content': content, 'language': language_from_request}
+            required_params = {'action': action, 'file_path': file_path, 'content': content}
             missing = [k for k, v in required_params.items() if v is None] 
             if missing:
                 app.logger.error(f"Missing required parameters (value is None): {missing}")
                 return jsonify({'error': f'Missing required parameters (value is None): {missing}'}), 400
             
-            # Check for empty string for language specifically, if it should not be allowed
-            if not language_from_request:
-                app.logger.error(f"Language parameter is missing or empty string.")
-                return jsonify({'error': 'Language parameter must be a non-empty string.'}),400
+            # Handle language parameter separately with a default
+            language_from_request = language_from_request or 'Python'  # Default to Python if not provided
+            app.logger.info(f"Using language: {language_from_request}")
 
             try:
                 app.logger.debug("Importing AI components...")
@@ -159,7 +158,7 @@ def create_app():
                 app.logger.info(f"Starting AI code review for: {file_path}")
                 try:
                     reviewer = CodeReviewer(ai_client)
-                    review_data = reviewer.review_code_content(content, file_path, language=language_from_request)
+                    review_data = reviewer.review_code_content(content, file_path)
                     app.logger.info(f"AI code review for {file_path} completed.")
                     response_payload = {
                         'action': action, # Return original action
@@ -175,7 +174,7 @@ def create_app():
                 app.logger.info(f"Starting AI test generation for: {file_path}")
                 try:
                     test_generator = TestGenerator(ai_client)
-                    test_data = test_generator.generate_tests(content, file_path, language=language_from_request)
+                    test_data = test_generator.generate_tests(content, file_path)
                     app.logger.info(f"AI test generation for {file_path} completed.")
                     response_payload = {
                         'action': action, # Return original action
@@ -191,7 +190,7 @@ def create_app():
                 app.logger.info(f"Starting AI code improvement for: {file_path}")
                 try:
                     reviewer = CodeReviewer(ai_client)
-                    improvement_data = reviewer.review_code_content(content, file_path, review_type="comprehensive", language=language_from_request)
+                    improvement_data = reviewer.review_code_content(content, file_path, review_type="comprehensive")
                     app.logger.info(f"AI code improvement for {file_path} completed.")
                     response_payload = {
                         'action': action, # Return original action
