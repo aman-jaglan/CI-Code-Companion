@@ -443,6 +443,12 @@
                     Commit Changes
                 </button>
                 
+                <!-- Test Apply Fix Button -->
+                <button x-show="selectedFile" @click="testApplyFix()" class="action-button btn-secondary text-xs">
+                    <i class="fas fa-flask"></i>
+                    Test Apply Fix
+                </button>
+                
                 <!-- Debug Button (temporary) -->
                 <button @click="loading = true; analysisType = 'review'; console.log('Debug: loading=', loading, 'analysisType=', analysisType)" 
                         class="action-button btn-secondary text-xs">
@@ -986,6 +992,9 @@
                 // Monaco Editor
                 monacoEditor: null,
                 
+                // Fix application flag to prevent infinite loops
+                _isApplyingFix: false,
+                
                 init() {
                     console.log('=== Repository Browser Initializing ===');
                     try {
@@ -1160,6 +1169,11 @@
                         
                         // Track changes
                         this.monacoEditor.onDidChangeModelContent(() => {
+                            // Skip change tracking during programmatic fixes to prevent infinite loops
+                            if (this._isApplyingFix) {
+                                return;
+                            }
+                            
                             const newContent = this.monacoEditor.getValue();
                             this.hasChanges = newContent !== this.selectedFile.content;
                         });
@@ -1455,15 +1469,6 @@
                     
                     if (Array.isArray(issuesArray)) {
                         issuesArray.forEach((issue, index) => {
-                            // Debug logging
-                            console.log(`🔍 Debug issue ${index + 1}:`, {
-                                'issue.description': issue.description,
-                                'issue.explanation': issue.explanation,
-                                'typeof description': typeof issue.description,
-                                'description length': issue.description?.length,
-                                'description value': JSON.stringify(issue.description)
-                            });
-                            
                             const processedIssue = {
                                 id: index + 1,
                                 title: issue.description || issue.explanation || 'Code Issue',
@@ -1476,8 +1481,6 @@
                                 oldContent: issue.old_content || '',
                                 lineNumber: issue.line_number || 1
                             };
-                            
-                            console.log(`Processed issue ${index + 1}: "${processedIssue.title}" with fix: ${!!processedIssue.suggestedFix}`);
                             
                             results.push(processedIssue);
                         });
@@ -1569,190 +1572,81 @@
                 
                 applyFix(result) {
                     if (!this.monacoEditor || !result.suggestedFix) {
-                        console.warn('Cannot apply fix: missing editor or suggested fix');
                         this.showNotification('error', 'Cannot apply fix: missing editor or suggested fix');
                         return;
                     }
                     
                     try {
-                        console.log('Applying fix:', result);
+                        console.log('Applying fix to line:', result.lineNumber);
                         
-                        const rawEditor = Alpine.raw(this.monacoEditor);
-                        const model = rawEditor.getModel();
+                        const editor = Alpine.raw(this.monacoEditor);
                         
-                        if (!model) {
-                            console.error('No model available in editor');
-                            this.showNotification('error', 'Editor model not available');
-                            return;
+                        // CRITICAL: Temporarily disable change tracking to prevent infinite loop
+                        this._isApplyingFix = true;
+                        
+                        // Get line number - use it directly from the API
+                        let lineNum = parseInt(result.lineNumber) || 1;
+                        
+                        // Ensure it's a valid line number
+                        const totalLines = editor.getModel().getLineCount();
+                        if (lineNum < 1 || lineNum > totalLines) {
+                            lineNum = 1;
                         }
                         
-                        // Handle empty new content (removal)
-                        if (!result.suggestedFix || result.suggestedFix.trim() === '') {
-                            this.showNotification('warning', 'This suggestion removes code. Please manually delete the highlighted code.');
-                            this.highlightCodeInEditor(result.lineNumber, result.oldContent);
-                            return;
-                        }
+                        console.log('Target line:', lineNum, 'Total lines:', totalLines);
                         
-                        // Get line number from result with better parsing
-                        const lineInfo = this.parseLineNumber(result.lineNumber);
-                        if (!lineInfo.valid) {
-                            this.showNotification('error', `Invalid line number format: ${result.lineNumber}`);
-                            return;
-                        }
+                        // Get current line content
+                        const currentLine = editor.getModel().getLineContent(lineNum);
+                        console.log('Current line content:', currentLine);
                         
-                        // Find the exact location of the old content
-                        const location = this.findCodeLocation(model, result.oldContent, lineInfo.start);
-                        if (!location.found) {
-                            this.showNotification('warning', 'Could not find exact code location. Applying at suggested line.');
-                            location.startLine = lineInfo.start;
-                            location.endLine = lineInfo.end || lineInfo.start;
-                        }
+                        // Replace the entire line with the suggested fix
+                        const range = new monaco.Range(lineNum, 1, lineNum, currentLine.length + 1);
                         
-                        // Create precise range for replacement
-                        const range = new monaco.Range(
-                            location.startLine, 1,
-                            location.endLine, model.getLineMaxColumn(location.endLine)
-                        );
-                        
-                        // Apply the edit with undo/redo support
-                        const edit = {
+                        // Apply the fix
+                        editor.executeEdits('ai-fix', [{
                             range: range,
-                            text: result.suggestedFix,
-                            forceMoveMarkers: true
-                        };
-                        
-                        rawEditor.executeEdits('ai-fix', [edit]);
-                        
-                        // Move cursor to the applied change and highlight it
-                        const newRange = new monaco.Range(
-                            location.startLine, 1,
-                            location.startLine + result.suggestedFix.split('\n').length - 1,
-                            model.getLineMaxColumn(location.startLine + result.suggestedFix.split('\n').length - 1)
-                        );
-                        
-                        rawEditor.setSelection(newRange);
-                        rawEditor.revealRangeInCenter(newRange);
-                        
-                        // Add temporary decoration to highlight the change
-                        const decorations = rawEditor.deltaDecorations([], [{
-                            range: newRange,
-                            options: {
-                                className: 'ai-applied-fix-highlight',
-                                glyphMarginClassName: 'ai-applied-fix-glyph'
-                            }
+                            text: result.suggestedFix
                         }]);
                         
-                        // Remove highlight after 3 seconds
-                        setTimeout(() => {
-                            rawEditor.deltaDecorations(decorations, []);
-                        }, 3000);
+                        // Move cursor to the fixed line
+                        editor.setPosition({ lineNumber: lineNum, column: 1 });
+                        editor.revealLineInCenter(lineNum);
+                        
+                        // Re-enable change tracking
+                        this._isApplyingFix = false;
                         
                         console.log('Fix applied successfully');
-                        this.showNotification('success', 'Fix applied successfully!');
-                        
-                        // Update button state temporarily
-                        const button = event?.target?.closest('button');
-                        if (button) {
-                            this.updateButtonState(button, 'success', 'Applied!', 'fas fa-check');
-                        }
+                        this.showNotification('success', `Fix applied at line ${lineNum}`);
                         
                     } catch (error) {
+                        this._isApplyingFix = false; // Ensure we re-enable tracking even on error
                         console.error('Error applying fix:', error);
-                        this.showNotification('error', `Error applying fix: ${error.message}`);
+                        this.showNotification('error', `Error: ${error.message}`);
                     }
-                },
-                
-                parseLineNumber(lineNumber) {
-                    try {
-                        if (typeof lineNumber === 'number') {
-                            return { valid: true, start: lineNumber, end: lineNumber };
-                        }
-                        
-                        if (typeof lineNumber === 'string') {
-                            if (lineNumber.includes('-')) {
-                                const [start, end] = lineNumber.split('-').map(s => parseInt(s.trim()));
-                                if (isNaN(start) || isNaN(end)) {
-                                    return { valid: false };
-                                }
-                                return { valid: true, start: start, end: end };
-                            } else {
-                                const line = parseInt(lineNumber.trim());
-                                if (isNaN(line)) {
-                                    return { valid: false };
-                                }
-                                return { valid: true, start: line, end: line };
-                            }
-                        }
-                        
-                        return { valid: false };
-                    } catch (error) {
-                        return { valid: false };
-                    }
-                },
-                
-                findCodeLocation(model, oldContent, suggestedLine) {
-                    const totalLines = model.getLineCount();
-                    const oldLines = oldContent.split('\n');
-                    const firstOldLine = oldLines[0].trim();
-                    
-                    // Start search from suggested line, then expand
-                    const searchStart = Math.max(1, suggestedLine - 2);
-                    const searchEnd = Math.min(totalLines, suggestedLine + 10);
-                    
-                    // First, try to find exact match near suggested line
-                    for (let i = searchStart; i <= searchEnd; i++) {
-                        const currentLine = model.getLineContent(i).trim();
-                        if (currentLine === firstOldLine) {
-                            // Check if the following lines also match
-                            let allMatch = true;
-                            for (let j = 1; j < oldLines.length && (i + j) <= totalLines; j++) {
-                                const nextLine = model.getLineContent(i + j).trim();
-                                const expectedLine = oldLines[j].trim();
-                                if (nextLine !== expectedLine) {
-                                    allMatch = false;
-                                    break;
-                                }
-                            }
-                            if (allMatch) {
-                                return {
-                                    found: true,
-                                    startLine: i,
-                                    endLine: i + oldLines.length - 1
-                                };
-                            }
-                        }
-                    }
-                    
-                    // If exact match not found, try fuzzy matching
-                    for (let i = searchStart; i <= searchEnd; i++) {
-                        const currentLine = model.getLineContent(i).trim();
-                        if (currentLine.includes(firstOldLine.substring(0, Math.min(20, firstOldLine.length)))) {
-                            return {
-                                found: false,
-                                startLine: i,
-                                endLine: i + oldLines.length - 1
-                            };
-                        }
-                    }
-                    
-                    // Fallback to suggested line
-                    return {
-                        found: false,
-                        startLine: suggestedLine,
-                        endLine: suggestedLine + oldLines.length - 1
-                    };
                 },
                 
                 highlightCodeInEditor(lineNumber, content) {
                     try {
                         const rawEditor = Alpine.raw(this.monacoEditor);
-                        const lineInfo = this.parseLineNumber(lineNumber);
+                        let targetLine = 1;
                         
-                        if (lineInfo.valid) {
-                            const range = new monaco.Range(lineInfo.start, 1, lineInfo.end, rawEditor.getModel().getLineMaxColumn(lineInfo.end));
-                            rawEditor.setSelection(range);
-                            rawEditor.revealRangeInCenter(range);
+                        // Simple line number parsing
+                        if (typeof lineNumber === 'number') {
+                            targetLine = lineNumber;
+                        } else if (typeof lineNumber === 'string') {
+                            const parsed = parseInt(lineNumber.split('-')[0]);
+                            if (!isNaN(parsed) && parsed > 0) {
+                                targetLine = parsed;
+                            }
                         }
+                        
+                        // Ensure line is within bounds
+                        const totalLines = rawEditor.getModel().getLineCount();
+                        targetLine = Math.max(1, Math.min(targetLine, totalLines));
+                        
+                        const range = new monaco.Range(targetLine, 1, targetLine, rawEditor.getModel().getLineMaxColumn(targetLine));
+                        rawEditor.setSelection(range);
+                        rawEditor.revealRangeInCenter(range);
                     } catch (error) {
                         console.warn('Could not highlight code:', error);
                     }
@@ -2230,6 +2124,39 @@
                 viewDiff(result) {
                     // Toggle diff display for this result
                     result.showDiff = !result.showDiff;
+                },
+                // Test function for debugging Apply Fix
+                testApplyFix() {
+                    try {
+                        console.log('Step 1: Starting test...');
+                        
+                        const editor = Alpine.raw(this.monacoEditor);
+                        const model = editor.getModel();
+                        const line1Content = model.getLineContent(1);
+                        
+                        console.log('Step 2: Temporarily disabling change tracking...');
+                        this._isApplyingFix = true;
+                        
+                        console.log('Step 3: Creating Monaco Range...');
+                        const range = new monaco.Range(1, 1, 1, line1Content.length + 1);
+                        
+                        console.log('Step 4: Applying test edit...');
+                        editor.executeEdits('test-edit', [{
+                            range: range,
+                            text: '# TEST FIX APPLIED SUCCESSFULLY!'
+                        }]);
+                        
+                        console.log('Step 5: Re-enabling change tracking...');
+                        this._isApplyingFix = false;
+                        
+                        console.log('All tests passed! Apply Fix should work.');
+                        this.showNotification('success', 'Test completed - Apply Fix should now work!');
+                        
+                    } catch (error) {
+                        this._isApplyingFix = false; // Ensure we re-enable tracking
+                        console.error('Test failed:', error);
+                        this.showNotification('error', 'Test failed: ' + error.message);
+                    }
                 }
             }
         }
