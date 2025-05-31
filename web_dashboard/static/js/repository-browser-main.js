@@ -40,7 +40,8 @@ function repositoryBrowser() {
             commits: false,
             pullrequests: false,
             insights: true,
-            dependencies: false
+            dependencies: false,
+            aiAssistant: false
         },
         
         // Enhanced file tree state
@@ -88,6 +89,69 @@ function repositoryBrowser() {
         // Graph visualization instances
         miniGraphInstance: null,
         fullGraphInstance: null,
+        
+        // NEW: AI Assistant System
+        assistantTab: 'review',
+        detectedTech: null,
+        
+        // Review functionality
+        reviewLoading: false,
+        reviewResults: [],
+        
+        // Test functionality
+        testLoading: false,
+        testResults: null,
+        testConfig: {
+            type: 'unit',
+            coverageFocus: {
+                functions: true,
+                edge_cases: true,
+                error_handling: true
+            }
+        },
+        
+        // Optimization functionality
+        optimizeLoading: false,
+        optimizationResults: [],
+        
+        // Chat functionality
+        chatLoading: false,
+        chatMessages: [],
+        chatInput: '',
+        
+        // Multi-technology AI agents
+        availableAgents: {
+            'frontend-react': {
+                name: 'React/Frontend Expert',
+                technologies: ['jsx', 'tsx', 'javascript', 'typescript', 'css', 'scss', 'html'],
+                specialties: ['component-architecture', 'hooks', 'state-management', 'performance', 'accessibility']
+            },
+            'backend-python': {
+                name: 'Python Backend Expert', 
+                technologies: ['python'],
+                specialties: ['django', 'flask', 'fastapi', 'async', 'testing', 'database', 'security']
+            },
+            'backend-node': {
+                name: 'Node.js Backend Expert',
+                technologies: ['javascript', 'typescript'],
+                specialties: ['express', 'nestjs', 'graphql', 'microservices', 'performance', 'security']
+            },
+            'database': {
+                name: 'Database Expert',
+                technologies: ['sql', 'json', 'yaml'],
+                specialties: ['query-optimization', 'schema-design', 'indexing', 'migrations', 'performance']
+            },
+            'devops': {
+                name: 'DevOps Expert',
+                technologies: ['dockerfile', 'yaml', 'json', 'shell', 'bash'],
+                specialties: ['docker', 'kubernetes', 'ci-cd', 'infrastructure', 'monitoring', 'security']
+            },
+            'mobile': {
+                name: 'Mobile Expert',
+                technologies: ['jsx', 'tsx', 'dart', 'swift', 'kotlin'],
+                specialties: ['react-native', 'flutter', 'native-modules', 'performance', 'deployment']
+            }
+        },
         
         init() {
             console.log('=== Repository Browser Initializing ===');
@@ -1106,6 +1170,348 @@ function repositoryBrowser() {
             }
             
             return response.json();
+        },
+        
+        // === AI ASSISTANT SYSTEM ===
+        
+        // Technology Detection and Agent Selection
+        detectTechnology(file) {
+            if (!file) return null;
+            
+            const language = this.getMonacoLanguage(file.name);
+            const fileContent = file.content || '';
+            
+            // Enhanced detection based on content analysis
+            let detectedAgent = null;
+            let confidence = 50;
+            
+            // React/Frontend detection
+            if (['jsx', 'tsx'].includes(language) || 
+                fileContent.includes('import React') || 
+                fileContent.includes('useState') || 
+                fileContent.includes('useEffect')) {
+                detectedAgent = 'frontend-react';
+                confidence = 90;
+            }
+            // Python backend detection
+            else if (language === 'python') {
+                if (fileContent.includes('django') || fileContent.includes('from django')) {
+                    detectedAgent = 'backend-python';
+                    confidence = 95;
+                } else if (fileContent.includes('flask') || fileContent.includes('from flask')) {
+                    detectedAgent = 'backend-python';
+                    confidence = 95;
+                } else if (fileContent.includes('fastapi') || fileContent.includes('from fastapi')) {
+                    detectedAgent = 'backend-python';
+                    confidence = 95;
+                } else {
+                    detectedAgent = 'backend-python';
+                    confidence = 80;
+                }
+            }
+            // Node.js backend detection
+            else if (['javascript', 'typescript'].includes(language)) {
+                if (fileContent.includes('express') || fileContent.includes('require(') || fileContent.includes('import')) {
+                    detectedAgent = 'backend-node';
+                    confidence = 85;
+                } else {
+                    detectedAgent = 'frontend-react';
+                    confidence = 70;
+                }
+            }
+            // Database detection
+            else if (['sql', 'json'].includes(language)) {
+                detectedAgent = 'database';
+                confidence = 80;
+            }
+            // DevOps detection
+            else if (['dockerfile', 'yaml', 'shell', 'bash'].includes(language) ||
+                     file.name.toLowerCase().includes('docker') ||
+                     file.name.toLowerCase().includes('ci') ||
+                     file.name.toLowerCase().includes('deploy')) {
+                detectedAgent = 'devops';
+                confidence = 85;
+            }
+            // Mobile detection
+            else if (['dart', 'swift', 'kotlin'].includes(language)) {
+                detectedAgent = 'mobile';
+                confidence = 90;
+            }
+            
+            if (detectedAgent && this.availableAgents[detectedAgent]) {
+                return {
+                    agent: detectedAgent,
+                    name: this.availableAgents[detectedAgent].name,
+                    confidence: confidence,
+                    specialties: this.availableAgents[detectedAgent].specialties
+                };
+            }
+            
+            return {
+                agent: 'general',
+                name: 'General Code Assistant',
+                confidence: 50,
+                specialties: ['general-analysis', 'best-practices']
+            };
+        },
+        
+        // Update technology detection when file changes
+        updateTechnologyDetection() {
+            if (this.selectedFile) {
+                this.detectedTech = this.detectTechnology(this.selectedFile);
+                console.log('Technology detected:', this.detectedTech);
+            }
+        },
+        
+        // File Review Functionality
+        async startFileReview() {
+            if (!this.selectedFile) return;
+            
+            this.reviewLoading = true;
+            this.reviewResults = [];
+            
+            try {
+                const agent = this.detectedTech?.agent || 'general';
+                const response = await fetch('/ai/review-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: this.selectedFile.path,
+                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
+                        language: this.getMonacoLanguage(this.selectedFile.name),
+                        agent: agent,
+                        project_context: {
+                            project_id: this.projectId,
+                            branch: this.currentBranch,
+                            file_tree: this.fileTree.map(f => ({ path: f.path, type: f.type }))
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Review failed: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                this.reviewResults = result.issues || [];
+                
+                this.showNotification('success', `Review completed: ${this.reviewResults.length} issues found`);
+                
+            } catch (error) {
+                console.error('File review error:', error);
+                this.showNotification('error', `Review failed: ${error.message}`);
+            } finally {
+                this.reviewLoading = false;
+            }
+        },
+        
+        // Test Generation Functionality
+        async startFileTest() {
+            if (!this.selectedFile) return;
+            
+            this.testLoading = true;
+            this.testResults = null;
+            
+            try {
+                const agent = this.detectedTech?.agent || 'general';
+                const response = await fetch('/ai/generate-tests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: this.selectedFile.path,
+                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
+                        language: this.getMonacoLanguage(this.selectedFile.name),
+                        agent: agent,
+                        test_config: this.testConfig,
+                        project_context: {
+                            project_id: this.projectId,
+                            branch: this.currentBranch
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Test generation failed: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                this.testResults = {
+                    code: result.test_code,
+                    explanation: result.explanation,
+                    coverage_areas: result.coverage_areas
+                };
+                
+                this.showNotification('success', 'Tests generated successfully');
+                
+            } catch (error) {
+                console.error('Test generation error:', error);
+                this.showNotification('error', `Test generation failed: ${error.message}`);
+            } finally {
+                this.testLoading = false;
+            }
+        },
+        
+        // Code Optimization Functionality
+        async startFileOptimization() {
+            if (!this.selectedFile) return;
+            
+            this.optimizeLoading = true;
+            this.optimizationResults = [];
+            
+            try {
+                const agent = this.detectedTech?.agent || 'general';
+                const response = await fetch('/ai/optimize-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: this.selectedFile.path,
+                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
+                        language: this.getMonacoLanguage(this.selectedFile.name),
+                        agent: agent,
+                        project_context: {
+                            project_id: this.projectId,
+                            branch: this.currentBranch,
+                            dependencies: this.getConnectedFiles(this.selectedFile.path)
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Optimization failed: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                this.optimizationResults = result.optimizations || [];
+                
+                this.showNotification('success', `Optimization completed: ${this.optimizationResults.length} suggestions found`);
+                
+            } catch (error) {
+                console.error('Code optimization error:', error);
+                this.showNotification('error', `Optimization failed: ${error.message}`);
+            } finally {
+                this.optimizeLoading = false;
+            }
+        },
+        
+        // Apply optimization
+        async applyOptimization(optimization) {
+            if (!this.monacoEditor || !optimization.line_number) return;
+            
+            try {
+                const model = this.monacoEditor.getModel();
+                const lineContent = model.getLineContent(optimization.line_number);
+                
+                // Apply the optimization by replacing the line
+                const range = {
+                    startLineNumber: optimization.line_number,
+                    startColumn: 1,
+                    endLineNumber: optimization.line_number,
+                    endColumn: lineContent.length + 1
+                };
+                
+                this.monacoEditor.executeEdits('optimization', [{
+                    range: range,
+                    text: optimization.after
+                }]);
+                
+                this.showNotification('success', 'Optimization applied');
+                
+            } catch (error) {
+                console.error('Error applying optimization:', error);
+                this.showNotification('error', 'Failed to apply optimization');
+            }
+        },
+        
+        // Chat Functionality
+        async sendChatMessage() {
+            if (!this.chatInput.trim() || !this.selectedFile) return;
+            
+            const userMessage = {
+                id: Date.now(),
+                role: 'user',
+                content: this.chatInput,
+                timestamp: new Date().toLocaleTimeString()
+            };
+            
+            this.chatMessages.push(userMessage);
+            const messageToSend = this.chatInput;
+            this.chatInput = '';
+            this.chatLoading = true;
+            
+            try {
+                const agent = this.detectedTech?.agent || 'general';
+                const response = await fetch('/ai/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: messageToSend,
+                        file_path: this.selectedFile.path,
+                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
+                        language: this.getMonacoLanguage(this.selectedFile.name),
+                        agent: agent,
+                        chat_history: this.chatMessages.slice(-10), // Last 10 messages for context
+                        project_context: {
+                            project_id: this.projectId,
+                            branch: this.currentBranch
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Chat failed: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                const assistantMessage = {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: result.response,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+                
+                this.chatMessages.push(assistantMessage);
+                
+            } catch (error) {
+                console.error('Chat error:', error);
+                const errorMessage = {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: `Sorry, I encountered an error: ${error.message}`,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+                this.chatMessages.push(errorMessage);
+            } finally {
+                this.chatLoading = false;
+            }
+        },
+        
+        // Utility methods for AI assistant
+        copyTestCode() {
+            if (this.testResults?.code) {
+                navigator.clipboard.writeText(this.testResults.code);
+                this.showNotification('success', 'Test code copied to clipboard');
+            }
+        },
+        
+        getSeverityIcon(severity) {
+            const icons = {
+                'error': 'fas fa-times-circle text-red-400',
+                'warning': 'fas fa-exclamation-triangle text-yellow-400',
+                'info': 'fas fa-info-circle text-blue-400',
+                'success': 'fas fa-check-circle text-green-400'
+            };
+            return icons[severity] || 'fas fa-circle text-gray-400';
+        },
+        
+        getSeverityBadge(severity) {
+            const badges = {
+                'error': 'bg-red-600 text-white',
+                'warning': 'bg-yellow-600 text-black',
+                'info': 'bg-blue-600 text-white',
+                'success': 'bg-green-600 text-white'
+            };
+            return badges[severity] || 'bg-gray-600 text-white';
         }
     };
 } 

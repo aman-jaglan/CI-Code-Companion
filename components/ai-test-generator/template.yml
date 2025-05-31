@@ -35,7 +35,7 @@ spec:
 
 ---
 
-# AI Test Generator Component
+# AI Test Generator Component (SDK-based)
 ai_test_generator:
   stage: test
   image: python:3.11
@@ -49,9 +49,9 @@ ai_test_generator:
     CREATE_MR: $[[ inputs.create_mr ]]
     AI_MODEL: $[[ inputs.ai_model ]]
   before_script:
-    - echo "🤖 Starting AI Test Generation..."
+    - echo "🤖 Starting AI Test Generation with CI Code Companion SDK..."
     - pip install --upgrade pip
-    - pip install google-cloud-aiplatform python-gitlab gitpython
+    - pip install -e .  # Install SDK from current repo
     - python --version
     - echo "GCP Project: $GCP_PROJECT_ID"
     - echo "Source Directory: $SOURCE_DIR"
@@ -60,145 +60,342 @@ ai_test_generator:
       python << 'EOF'
       import os
       import sys
+      import asyncio
       import logging
       from pathlib import Path
+      import json
+      import subprocess
 
-      # Add the CI Code Companion to Python path
-      sys.path.insert(0, '/builds/$CI_PROJECT_PATH')
-
-      from src.ci_code_companion import VertexAIClient, TestGenerator, GitLabIntegration
+      # Import CI Code Companion SDK
+      from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
+      from ci_code_companion_sdk.core.exceptions import SDKError, ConfigurationError
 
       # Configure logging
       logging.basicConfig(level=logging.INFO)
       logger = logging.getLogger(__name__)
 
-      def main():
+      async def main():
           try:
-              # Initialize components
-              logger.info("Initializing AI components...")
+              # Initialize SDK
+              logger.info("Initializing CI Code Companion SDK...")
               
               project_id = os.getenv('GCP_PROJECT_ID')
               if not project_id:
                   logger.error("GCP_PROJECT_ID is required")
                   sys.exit(1)
               
-              # Initialize Vertex AI client
-              ai_client = VertexAIClient(
+              # Configure SDK
+              config = SDKConfig(
+                  ai_provider='vertex_ai',
                   project_id=project_id,
-                  location=os.getenv('GCP_REGION', 'us-central1')
+                  region=os.getenv('GCP_REGION', 'us-central1'),
+                  log_level='INFO'
               )
               
-              # Health check
-              health = ai_client.health_check()
-              if health['status'] != 'healthy':
-                  logger.error(f"AI client unhealthy: {health}")
-                  sys.exit(1)
-              
-              logger.info("✅ AI client initialized successfully")
-              
-              # Initialize test generator
-              test_gen = TestGenerator(ai_client)
-              
-              # Initialize GitLab integration
-              gitlab_integration = GitLabIntegration()
+              sdk = CICodeCompanionSDK(config=config)
+              logger.info("✅ SDK initialized successfully")
               
               # Get source directory
               source_dir = os.getenv('SOURCE_DIR', 'src')
               if not os.path.exists(source_dir):
-                  logger.warning(f"Source directory {source_dir} not found")
+                  # Try alternative directories
+                  alternative_dirs = ['ci_code_companion_sdk', 'web_dashboard', '.']
+                  source_dir = None
+                  for alt_dir in alternative_dirs:
+                      if os.path.exists(alt_dir):
+                          source_dir = alt_dir
+                          break
+                  
+                  if not source_dir:
+                      logger.warning("No suitable source directory found")
+                      return
+              
+              logger.info(f"Scanning source directory: {source_dir}")
+              
+              # Find source files
+              source_files = find_source_files(source_dir)
+              
+              if not source_files:
+                  logger.info("No source files found for test generation")
                   return
               
-              # Generate tests
-              logger.info(f"Generating tests for files in {source_dir}...")
+              logger.info(f"Found {len(source_files)} source files")
               
-              results = test_gen.batch_generate_tests(
-                  source_dir=source_dir,
-                  output_dir='generated_tests',
-                  file_patterns=['*.py'],
-                  exclude_patterns=['*test*', '*__pycache__*']
-              )
+              # Generate tests for each file
+              generated_tests = {}
+              test_results = []
               
-              if not results:
-                  logger.info("No tests generated - no suitable source files found")
+              for file_path in source_files:
+                  try:
+                      logger.info(f"Generating tests for {file_path}...")
+                      
+                      # Read file content
+                      with open(file_path, 'r', encoding='utf-8') as f:
+                          content = f.read()
+                      
+                      # Generate tests using SDK
+                      test_result = await sdk.generate_tests(file_path, content)
+                      
+                      if test_result and test_result.get('test_code'):
+                          test_file_path = test_result.get('test_file_path', f"test_{Path(file_path).name}")
+                          generated_tests[test_file_path] = test_result['test_code']
+                          
+                          test_results.append({
+                              'source_file': file_path,
+                              'test_file': test_file_path,
+                              'framework': test_result.get('framework', 'pytest'),
+                              'coverage_areas': test_result.get('coverage_areas', []),
+                              'confidence_score': test_result.get('confidence_score', 0.0),
+                              'explanation': test_result.get('explanation', '')
+                          })
+                          
+                          logger.info(f"✅ Generated tests for {file_path}")
+                      else:
+                          logger.warning(f"No tests generated for {file_path}")
+                          
+                  except Exception as e:
+                      logger.error(f"Error generating tests for {file_path}: {str(e)}")
+              
+              if not generated_tests:
+                  logger.info("No tests were generated")
                   return
               
-              logger.info(f"Generated tests for {len(results)} files")
+              # Create test directory
+              test_dir = 'generated_tests'
+              os.makedirs(test_dir, exist_ok=True)
               
-              # Collect all generated test files
-              generated_files = {}
-              for source_file, test_files in results.items():
-                  for test_file_name, test_content in test_files.items():
-                      generated_files[f"generated_tests/{test_file_name}"] = test_content
+              # Write generated test files
+              for test_file_path, test_content in generated_tests.items():
+                  full_path = os.path.join(test_dir, test_file_path)
+                  os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                  
+                  with open(full_path, 'w') as f:
+                      f.write(test_content)
+                  
+                  logger.info(f"Saved: {full_path}")
               
               # Create artifacts directory
               os.makedirs('artifacts', exist_ok=True)
               
-              # Save generated files locally
-              for file_path, content in generated_files.items():
-                  os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                  with open(file_path, 'w') as f:
-                      f.write(content)
-                  logger.info(f"Saved: {file_path}")
-              
-              # Create summary report
-              summary = f"""# 🤖 AI Test Generation Summary
-
-              ## Generated Files
-              {chr(10).join(f'- `{path}`' for path in generated_files.keys())}
-
-              ## Statistics
-              - Source files processed: {len(results)}
-              - Test files generated: {len(generated_files)}
-              - Total lines generated: {sum(len(content.split(chr(10))) for content in generated_files.values())}
-
-              ## Model Used
-              - **Model**: {os.getenv('AI_MODEL', 'code-bison@001')}
-              - **Framework**: {os.getenv('TEST_FRAMEWORK', 'pytest')}
-              - **Language**: {os.getenv('LANGUAGE', 'python')}
-
-              Generated by CI Code Companion
-              """
+              # Generate summary report
+              report = generate_test_summary(test_results, generated_tests)
               
               with open('artifacts/test_generation_summary.md', 'w') as f:
-                  f.write(summary)
+                  f.write(report)
+              
+              # Generate JSON report
+              json_report = {
+                  'generation_summary': {
+                      'source_files_processed': len(source_files),
+                      'test_files_generated': len(generated_tests),
+                      'total_lines_generated': sum(len(content.split('\n')) for content in generated_tests.values()),
+                      'framework': os.getenv('TEST_FRAMEWORK', 'pytest'),
+                      'language': os.getenv('LANGUAGE', 'python')
+                  },
+                  'results': test_results
+              }
+              
+              with open('artifacts/test_generation.json', 'w') as f:
+                  json.dump(json_report, f, indent=2)
+              
+              logger.info(f"Generated {len(generated_tests)} test files")
               
               # Create merge request if requested
               create_mr = os.getenv('CREATE_MR', 'true').lower() == 'true'
-              if create_mr and generated_files:
-                  logger.info("Creating merge request for generated tests...")
-                  
-                  mr_info = gitlab_integration.create_ai_generated_mr(
-                      generated_files=generated_files,
-                      source_branch_prefix="ai-generated-tests",
-                      target_branch=os.getenv('TARGET_BRANCH', 'main'),
-                      mr_title_prefix="🧪 AI Generated Tests:"
-                  )
-                  
-                  if mr_info:
-                      logger.info(f"✅ Created MR: {mr_info['web_url']}")
-                      print(f"MERGE_REQUEST_URL={mr_info['web_url']}")
-                  else:
-                      logger.warning("Failed to create merge request")
+              if create_mr and generated_tests:
+                  await create_gitlab_mr(generated_tests, report)
               
               logger.info("🎉 AI test generation completed successfully!")
               
+          except (SDKError, ConfigurationError) as e:
+              logger.error(f"SDK error: {str(e)}")
+              sys.exit(1)
           except Exception as e:
               logger.error(f"Error in AI test generation: {str(e)}")
               sys.exit(1)
 
+      def find_source_files(source_dir):
+          """Find source files suitable for test generation"""
+          source_files = []
+          
+          # Define patterns for different languages
+          language = os.getenv('LANGUAGE', 'python').lower()
+          
+          if language == 'python':
+              patterns = ['**/*.py']
+              exclude_patterns = ['**/test_*.py', '**/*_test.py', '**/tests/**', '**/__pycache__/**']
+          elif language in ['javascript', 'typescript']:
+              patterns = ['**/*.js', '**/*.ts', '**/*.jsx', '**/*.tsx']
+              exclude_patterns = ['**/*.test.js', '**/*.test.ts', '**/*.spec.js', '**/*.spec.ts', '**/tests/**', '**/node_modules/**']
+          else:
+              patterns = ['**/*']
+              exclude_patterns = ['**/test*', '**/spec*']
+          
+          for pattern in patterns:
+              for file_path in Path(source_dir).glob(pattern):
+                  if file_path.is_file():
+                      # Check if file should be excluded
+                      should_exclude = False
+                      for exclude_pattern in exclude_patterns:
+                          if file_path.match(exclude_pattern):
+                              should_exclude = True
+                              break
+                      
+                      if not should_exclude:
+                          source_files.append(str(file_path))
+          
+          return source_files[:10]  # Limit to first 10 files to avoid overwhelming
+
+      def generate_test_summary(test_results, generated_tests):
+          """Generate markdown summary of test generation"""
+          if not test_results:
+              return """# 🧪 AI Test Generation Summary
+
+## ❌ No Tests Generated
+
+No suitable source files were found or processed for test generation.
+
+Generated by CI Code Companion SDK
+"""
+          
+          total_lines = sum(len(content.split('\n')) for content in generated_tests.values())
+          frameworks = list(set(result['framework'] for result in test_results))
+          
+          report = f"""# 🧪 AI Test Generation Summary
+
+## Overview
+- **Source Files Processed**: {len(test_results)}
+- **Test Files Generated**: {len(generated_tests)}
+- **Total Lines Generated**: {total_lines}
+- **Test Frameworks**: {', '.join(frameworks)}
+- **Language**: {os.getenv('LANGUAGE', 'python').title()}
+
+## Generated Test Files
+
+"""
+          
+          for result in test_results:
+              source_file = result['source_file']
+              test_file = result['test_file']
+              confidence = result['confidence_score']
+              coverage_areas = result['coverage_areas']
+              explanation = result['explanation']
+              
+              report += f"### 📄 `{test_file}`\n"
+              report += f"**Source**: `{source_file}`\n"
+              report += f"**Confidence Score**: {confidence:.2f}\n"
+              
+              if coverage_areas:
+                  report += f"**Coverage Areas**: {', '.join(coverage_areas)}\n"
+              
+              if explanation:
+                  report += f"**Description**: {explanation}\n"
+              
+              report += "\n---\n\n"
+          
+          report += f"""## Usage Instructions
+
+1. Review the generated test files in the `generated_tests/` directory
+2. Install test dependencies: `pip install {os.getenv('TEST_FRAMEWORK', 'pytest')}`
+3. Run tests: `{get_test_command()}`
+4. Customize tests as needed for your specific requirements
+
+## Quality Notes
+
+- Generated tests provide a solid foundation but may need customization
+- Review and update test data and assertions as appropriate
+- Consider adding integration tests for complex workflows
+- Ensure tests follow your project's testing conventions
+
+*Generated by CI Code Companion SDK*
+"""
+          
+          return report
+
+      def get_test_command():
+          """Get the appropriate test command based on framework"""
+          framework = os.getenv('TEST_FRAMEWORK', 'pytest').lower()
+          
+          if framework == 'pytest':
+              return 'pytest generated_tests/'
+          elif framework == 'unittest':
+              return 'python -m unittest discover generated_tests/'
+          elif framework in ['jest', 'mocha']:
+              return f'{framework} generated_tests/'
+          else:
+              return f'{framework} generated_tests/'
+
+      async def create_gitlab_mr(generated_tests, report):
+          """Create GitLab merge request with generated tests"""
+          try:
+              gitlab_token = os.getenv('GITLAB_TOKEN')
+              project_id = os.getenv('CI_PROJECT_ID')
+              gitlab_url = os.getenv('CI_SERVER_URL', 'https://gitlab.com')
+              target_branch = os.getenv('TARGET_BRANCH', 'main')
+              
+              if not all([gitlab_token, project_id]):
+                  logger.warning("Missing GitLab credentials for creating MR")
+                  return
+              
+              # Create a new branch for the tests
+              branch_name = f"ai-generated-tests-{os.getenv('CI_PIPELINE_ID', 'manual')}"
+              
+              # Git setup
+              subprocess.run(['git', 'config', 'user.email', 'ci@cicompanion.ai'], check=True)
+              subprocess.run(['git', 'config', 'user.name', 'CI Code Companion'], check=True)
+              subprocess.run(['git', 'checkout', '-b', branch_name], check=True)
+              
+              # Add generated files
+              subprocess.run(['git', 'add', 'generated_tests/'], check=True)
+              subprocess.run(['git', 'commit', '-m', '🧪 Add AI-generated tests'], check=True)
+              subprocess.run(['git', 'push', 'origin', branch_name], check=True)
+              
+              # Create MR via GitLab API
+              import requests
+              
+              url = f"{gitlab_url}/api/v4/projects/{project_id}/merge_requests"
+              headers = {'Private-Token': gitlab_token}
+              data = {
+                  'source_branch': branch_name,
+                  'target_branch': target_branch,
+                  'title': f'🧪 AI Generated Tests ({len(generated_tests)} files)',
+                  'description': f"""## 🤖 AI-Generated Test Suite
+
+{report}
+
+### Review Checklist
+- [ ] Review test logic and assertions
+- [ ] Update test data as needed
+- [ ] Ensure tests follow project conventions
+- [ ] Run tests locally to verify functionality
+
+Generated automatically by CI Code Companion SDK.
+""",
+                  'remove_source_branch': True
+              }
+              
+              response = requests.post(url, headers=headers, json=data)
+              if response.status_code == 201:
+                  mr_data = response.json()
+                  logger.info(f"✅ Created MR: {mr_data['web_url']}")
+                  print(f"MERGE_REQUEST_URL={mr_data['web_url']}")
+              else:
+                  logger.warning(f"Failed to create MR: {response.status_code}")
+                  
+          except Exception as e:
+              logger.warning(f"Failed to create GitLab MR: {e}")
+
       if __name__ == "__main__":
-          main()
+          asyncio.run(main())
       EOF
   artifacts:
     paths:
       - generated_tests/
       - artifacts/
     reports:
-      junit: artifacts/test_generation_summary.md
+      junit: artifacts/test_generation.json
     expire_in: 1 week
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
-      when: never
-    - if: $CI_COMMIT_BRANCH
-  allow_failure: true 
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual 

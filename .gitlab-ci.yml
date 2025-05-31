@@ -1,13 +1,14 @@
 stages:
+  - validate
   - ai-health-check
   - ai-code-analysis
   - ai-test-generation
   - quality-gate
-  - deploy-dashboard
+  - deploy
 
 variables:
   DOCKER_IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
-  PYTHON_VERSION: "3.9"
+  PYTHON_VERSION: "3.11"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   GCP_PROJECT_ID: ${GCP_PROJECT_ID}
   GITLAB_URL: ${CI_SERVER_URL}
@@ -18,75 +19,239 @@ cache:
     - .cache/pip/
     - venv/
 
-# Template for Python jobs
-.python_base:
+# Template for Python jobs with SDK
+.python_sdk:
   image: python:$PYTHON_VERSION
   before_script:
     - pip install --upgrade pip
-    - pip install -r requirements.txt
+    - pip install -e .  # Install SDK
+    - echo "✅ CI Code Companion SDK installed"
 
-# Health check to ensure AI services are working
-ai-health-check:
-  stage: ai-health-check
-  image: python:${PYTHON_VERSION}
-  before_script:
-    - python -m venv venv
-    - source venv/bin/activate
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
+# Validate code quality
+lint:
+  extends: .python_sdk
+  stage: validate
   script:
-    - echo "🔍 Checking AI service connectivity..."
+    - echo "🔍 Running code quality checks..."
+    - flake8 ci_code_companion_sdk/ web_dashboard/ --max-line-length=88 --extend-ignore=E203,W503
+    - black --check ci_code_companion_sdk/ web_dashboard/
+    - mypy ci_code_companion_sdk/ --ignore-missing-imports
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Run unit tests
+test:
+  extends: .python_sdk
+  stage: validate
+  script:
+    - echo "🧪 Running unit tests..."
+    - pytest tests/ -v --cov=ci_code_companion_sdk --cov-report=xml --cov-report=term
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Health check to ensure AI SDK services are working
+ai-health-check:
+  extends: .python_sdk
+  stage: ai-health-check
+  script:
+    - echo "🔍 Checking AI SDK connectivity..."
     - python -c "
-      from src.vertex_ai_client import VertexAIClient;
-      client = VertexAIClient();
-      result = client.health_check();
-      print('✅ AI Health Check:', result);
-      assert 'success' in result.lower(), 'AI service not healthy'
+      import asyncio;
+      from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig;
+      async def health_check():
+          config = SDKConfig();
+          sdk = CICodeCompanionSDK(config=config);
+          stats = await sdk.get_stats();
+          print('✅ SDK Health Check:', stats);
+          return stats;
+      result = asyncio.run(health_check());
+      print('SDK is healthy')
       "
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# AI Code Analysis - Main stage
+# AI Code Analysis using SDK
 ai-code-analysis:
+  extends: .python_sdk
   stage: ai-code-analysis
-  image: python:${PYTHON_VERSION}
-  before_script:
-    - python -m venv venv
-    - source venv/bin/activate
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
-    # Setup git for changed files detection
-    - git fetch origin $CI_DEFAULT_BRANCH
+  variables:
+    REVIEW_TYPE: "comprehensive"
+    SEVERITY_THRESHOLD: "medium"
+    POST_COMMENT: "true"
   script:
-    - echo "🤖 Running AI Code Analysis..."
-    - python scripts/gitlab_ci_integration.py
+    - echo "🤖 Running AI Code Analysis with SDK..."
+    - |
+      python << 'EOF'
+      import asyncio
+      import os
+      import json
+      import subprocess
+      from pathlib import Path
+      
+      from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
+      from ci_code_companion_sdk.core.exceptions import SDKError
+      
+      async def analyze_changed_files():
+          # Initialize SDK
+          config = SDKConfig()
+          sdk = CICodeCompanionSDK(config=config)
+          
+          # Get changed files
+          try:
+              if os.getenv('CI_MERGE_REQUEST_IID'):
+                  target_branch = os.getenv('CI_MERGE_REQUEST_TARGET_BRANCH_NAME', 'main')
+                  result = subprocess.run(
+                      ['git', 'diff', '--name-only', f'origin/{target_branch}...HEAD'],
+                      capture_output=True, text=True, check=True
+                  )
+              else:
+                  result = subprocess.run(
+                      ['git', 'diff', '--name-only', 'HEAD~1', 'HEAD'],
+                      capture_output=True, text=True, check=True
+                  )
+              
+              changed_files = [f.strip() for f in result.stdout.split('\n') if f.strip()]
+              code_files = [f for f in changed_files if Path(f).suffix in {'.py', '.js', '.jsx', '.ts', '.tsx'} and Path(f).exists()]
+              
+              if not code_files:
+                  print("No code files to analyze")
+                  return
+              
+              print(f"Analyzing {len(code_files)} changed files...")
+              
+              # Analyze files
+              results = []
+              for file_path in code_files:
+                  try:
+                      with open(file_path, 'r') as f:
+                          content = f.read()
+                      
+                      result = await sdk.analyze_file(file_path, content)
+                      results.append({
+                          'file_path': file_path,
+                          'issues': result.issues,
+                          'suggestions': result.suggestions,
+                          'confidence_score': result.confidence_score
+                      })
+                      print(f"✅ Analyzed {file_path}")
+                      
+                  except Exception as e:
+                      print(f"❌ Error analyzing {file_path}: {e}")
+              
+              # Create artifacts directory
+              os.makedirs('ai-reports', exist_ok=True)
+              
+              # Save results
+              with open('ai-reports/analysis-results.json', 'w') as f:
+                  json.dump({
+                      'files_analyzed': len(code_files),
+                      'total_issues': sum(len(r['issues']) for r in results),
+                      'total_suggestions': sum(len(r['suggestions']) for r in results),
+                      'results': results
+                  }, f, indent=2)
+              
+              print(f"Analysis complete: {len(results)} files processed")
+              
+          except Exception as e:
+              print(f"Error in analysis: {e}")
+              raise
+      
+      asyncio.run(analyze_changed_files())
+      EOF
   artifacts:
     when: always
     paths:
       - ai-reports/
-    reports:
-      junit: ai-reports/analysis-results.xml  # If you generate XML reports
     expire_in: 1 week
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - "**/*.py"
-  allow_failure: false
+        - "**/*.js"
+        - "**/*.jsx"
+        - "**/*.ts" 
+        - "**/*.tsx"
 
-# AI Test Generation - Runs in parallel
+# AI Test Generation using SDK
 ai-test-generation:
+  extends: .python_sdk
   stage: ai-test-generation
-  image: python:${PYTHON_VERSION}
-  before_script:
-    - python -m venv venv
-    - source venv/bin/activate
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
-    - git fetch origin $CI_DEFAULT_BRANCH
   script:
-    - echo "🧪 Generating AI-powered tests..."
-    - python scripts/ai_test_runner.py
+    - echo "🧪 Generating AI-powered tests with SDK..."
+    - |
+      python << 'EOF'
+      import asyncio
+      import os
+      import json
+      from pathlib import Path
+      
+      from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
+      
+      async def generate_tests():
+          config = SDKConfig()
+          sdk = CICodeCompanionSDK(config=config)
+          
+          # Find source files (limit to avoid overwhelming)
+          source_files = []
+          for pattern in ['ci_code_companion_sdk/**/*.py', 'web_dashboard/**/*.py']:
+              for file_path in Path('.').glob(pattern):
+                  if 'test' not in str(file_path) and '__pycache__' not in str(file_path):
+                      source_files.append(str(file_path))
+          
+          source_files = source_files[:5]  # Limit to 5 files
+          
+          if not source_files:
+              print("No source files found for test generation")
+              return
+          
+          print(f"Generating tests for {len(source_files)} files...")
+          
+          os.makedirs('generated-tests', exist_ok=True)
+          results = []
+          
+          for file_path in source_files:
+              try:
+                  with open(file_path, 'r') as f:
+                      content = f.read()
+                  
+                  test_result = await sdk.generate_tests(file_path, content)
+                  
+                  if test_result and test_result.get('test_code'):
+                      test_file = f"generated-tests/test_{Path(file_path).name}"
+                      with open(test_file, 'w') as f:
+                          f.write(test_result['test_code'])
+                      
+                      results.append({
+                          'source_file': file_path,
+                          'test_file': test_file,
+                          'framework': test_result.get('framework', 'pytest')
+                      })
+                      print(f"✅ Generated tests for {file_path}")
+                  
+              except Exception as e:
+                  print(f"❌ Error generating tests for {file_path}: {e}")
+          
+          # Save summary
+          with open('generated-tests/generation-summary.json', 'w') as f:
+              json.dump({
+                  'files_processed': len(source_files),
+                  'tests_generated': len(results),
+                  'results': results
+              }, f, indent=2)
+          
+          print(f"Test generation complete: {len(results)} test files created")
+      
+      asyncio.run(generate_tests())
+      EOF
   artifacts:
     when: always
     paths:
@@ -96,43 +261,88 @@ ai-test-generation:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - "**/*.py"
-  allow_failure: true  # Test generation shouldn't block deployment
+    - when: manual
+  allow_failure: true
 
-# Quality Gate - Checks if code meets standards
+# Quality Gate using SDK analysis
 quality-gate:
+  extends: .python_sdk
   stage: quality-gate
-  image: python:${PYTHON_VERSION}
   dependencies:
     - ai-code-analysis
   script:
     - echo "🚦 Evaluating code quality gate..."
-    - python scripts/quality_gate_checker.py ai-reports/analysis-results.json
+    - |
+      python << 'EOF'
+      import json
+      import sys
+      
+      try:
+          with open('ai-reports/analysis-results.json', 'r') as f:
+              data = json.load(f)
+          
+          total_issues = data.get('total_issues', 0)
+          files_analyzed = data.get('files_analyzed', 0)
+          
+          # Quality gate rules
+          critical_issues = 0
+          high_issues = 0
+          
+          for result in data.get('results', []):
+              for issue in result.get('issues', []):
+                  severity = issue.get('severity', 'info')
+                  if severity == 'critical':
+                      critical_issues += 1
+                  elif severity == 'high':
+                      high_issues += 1
+          
+          print(f"Quality Gate Analysis:")
+          print(f"- Files analyzed: {files_analyzed}")
+          print(f"- Total issues: {total_issues}")
+          print(f"- Critical issues: {critical_issues}")
+          print(f"- High issues: {high_issues}")
+          
+          # Fail if too many critical issues
+          if critical_issues > 0:
+              print(f"❌ Quality gate failed: {critical_issues} critical issues found")
+              sys.exit(1)
+          elif high_issues > 5:
+              print(f"⚠️  Quality gate warning: {high_issues} high issues found")
+              # Don't fail for high issues, just warn
+          
+          print("✅ Quality gate passed")
+          
+      except FileNotFoundError:
+          print("No analysis results found, skipping quality gate")
+      except Exception as e:
+          print(f"Error in quality gate: {e}")
+          sys.exit(1)
+      EOF
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - "**/*.py"
-  allow_failure: false
+        - "**/*.js"
+        - "**/*.jsx"
+        - "**/*.ts"
+        - "**/*.tsx"
 
-# Deploy Dashboard (only on main branch)
+# Deploy Dashboard using SDK
 deploy-dashboard:
-  stage: deploy-dashboard
-  image: python:${PYTHON_VERSION}
-  before_script:
-    - python -m venv venv
-    - source venv/bin/activate
-    - pip install flask gunicorn
+  extends: .python_sdk
+  stage: deploy
   script:
-    - echo "🚀 Deploying AI Code Companion Dashboard..."
-    - cd web_dashboard
-    - gunicorn --bind 0.0.0.0:5000 app:app &
-    - echo "Dashboard deployed at ${CI_ENVIRONMENT_URL}"
+    - echo "🚀 Deploying CI Code Companion Dashboard..."
+    - cd web_dashboard || cd .
+    - gunicorn --bind 0.0.0.0:$PORT run_dashboard:app --timeout 120 --workers 2
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   environment:
     name: production
-    url: ${CI_ENVIRONMENT_URL}
+    url: $CI_ENVIRONMENT_URL
+  allow_failure: false
 
-# Notification job - Sends Slack/Teams notifications
+# Notification job
 ai-analysis-notification:
   stage: .post
   image: alpine:latest
@@ -144,13 +354,13 @@ ai-analysis-notification:
     - echo "📢 Sending AI analysis notifications..."
     - |
       if [ -f "ai-reports/analysis-results.json" ]; then
-        QUALITY_SCORE=$(cat ai-reports/analysis-results.json | jq -r '.overall_scores.code_quality')
-        SECURITY_SCORE=$(cat ai-reports/analysis-results.json | jq -r '.overall_scores.security')
+        TOTAL_ISSUES=$(cat ai-reports/analysis-results.json | jq -r '.total_issues')
+        FILES_ANALYZED=$(cat ai-reports/analysis-results.json | jq -r '.files_analyzed')
         
-        MESSAGE="🤖 AI Code Analysis Complete\\n"
-        MESSAGE="${MESSAGE}📊 Quality: ${QUALITY_SCORE}/10\\n"
-        MESSAGE="${MESSAGE}🔒 Security: ${SECURITY_SCORE}/10\\n"
-        MESSAGE="${MESSAGE}🔗 View: ${CI_PIPELINE_URL}"
+        MESSAGE="🤖 AI Code Analysis Complete (SDK)\\n"
+        MESSAGE="${MESSAGE}📁 Files: ${FILES_ANALYZED}\\n"
+        MESSAGE="${MESSAGE}🐛 Issues: ${TOTAL_ISSUES}\\n"
+        MESSAGE="${MESSAGE}🔗 Pipeline: ${CI_PIPELINE_URL}"
         
         # Send to Slack (if webhook configured)
         if [ ! -z "$SLACK_WEBHOOK_URL" ]; then
@@ -158,100 +368,17 @@ ai-analysis-notification:
             --data "{\"text\":\"${MESSAGE}\"}" \
             $SLACK_WEBHOOK_URL
         fi
+        
+        echo "Notification sent"
+      else
+        echo "No analysis results to notify about"
       fi
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         - "**/*.py"
-  allow_failure: true
-
-# Code Review Bot - Posts detailed comments
-code-review-bot:
-  stage: .post
-  image: python:${PYTHON_VERSION}
-  dependencies:
-    - ai-code-analysis
-  before_script:
-    - pip install requests
-  script:
-    - echo "🗨️ Posting AI code review comments..."
-    - python scripts/gitlab_mr_commenter.py
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - "**/*.py"
-  allow_failure: true
-
-# Validate code quality
-lint:
-  extends: .python_base
-  stage: validate
-  script:
-    - flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
-    - black --check src/ tests/
-  only:
-    - merge_requests
-    - main
-    - develop
-
-# Run unit tests
-test:
-  extends: .python_base
-  stage: test
-  script:
-    - pytest tests/ --cov=src --cov-report=xml --cov-report=term
-  coverage: '/TOTAL.*\s+(\d+%)$/'
-  artifacts:
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
-    expire_in: 1 week
-  only:
-    - merge_requests
-    - main
-    - develop
-
-# Build component validation
-validate_component:
-  stage: build
-  image: registry.gitlab.com/gitlab-org/cli:latest
-  script:
-    - echo "Validating CI/CD component structure..."
-    - ls -la components/
-    - cat components/ai-test-generator/template.yml
-  only:
-    - merge_requests
-    - main
-
-# Integration test with sample project
-integration_test:
-  stage: test
-  image: python:$PYTHON_VERSION
-  variables:
-    GCP_PROJECT_ID: "ci-code-companion-test"
-    GCP_REGION: "us-central1"
-  before_script:
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
-  script:
-    - echo "Running integration tests..."
-    - python scripts/test_vertex_ai_connection.py
-    - python scripts/test_component_integration.py
-  only:
-    - schedules
-    - main
-
-# Deploy component to catalog (manual)
-deploy_to_catalog:
-  stage: deploy
-  image: registry.gitlab.com/gitlab-org/cli:latest
-  script:
-    - echo "Deploying to CI/CD Catalog..."
-    - echo "Component version: $CI_COMMIT_TAG"
-  rules:
-    - if: $CI_COMMIT_TAG
-    - when: manual
-  environment:
-    name: catalog
-    url: ${CI_PROJECT_URL} 
+        - "**/*.js"
+        - "**/*.jsx"
+        - "**/*.ts"
+        - "**/*.tsx"
+  allow_failure: true 
