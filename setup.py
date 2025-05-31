@@ -109,13 +109,19 @@ ENTRY_POINTS = {
         "ci-code-companion=ci_code_companion_sdk.cli.main:main",
         "ccc=ci_code_companion_sdk.cli.main:main",
     ],
-    "ci_code_companion_sdk.agents": [
-        "react=ci_code_companion_sdk.agents.react_agent:ReactAgent",
-        "python=ci_code_companion_sdk.agents.python_agent:PythonAgent",
-        "node=ci_code_companion_sdk.agents.node_agent:NodeAgent",
-        "database=ci_code_companion_sdk.agents.database_agent:DatabaseAgent",
-        "devops=ci_code_companion_sdk.agents.devops_agent:DevOpsAgent",
-        "mobile=ci_code_companion_sdk.agents.mobile_agent:MobileAgent",
+    "ci_code_companion_sdk.specialized_agents.code": [
+        "react_code=ci_code_companion_sdk.agents.specialized.code.react_code_agent:ReactCodeAgent",
+        "python_code=ci_code_companion_sdk.agents.specialized.code.python_code_agent:PythonCodeAgent",
+        "node_code=ci_code_companion_sdk.agents.specialized.code.node_code_agent:NodeCodeAgent",
+    ],
+    "ci_code_companion_sdk.specialized_agents.testing": [
+        "react_test=ci_code_companion_sdk.agents.specialized.testing.react_test_agent:ReactTestAgent",
+        "python_test=ci_code_companion_sdk.agents.specialized.testing.python_test_agent:PythonTestAgent",
+        "api_test=ci_code_companion_sdk.agents.specialized.testing.api_test_agent:ApiTestAgent",
+    ],
+    "ci_code_companion_sdk.specialized_agents.security": [
+        "security_scanner=ci_code_companion_sdk.agents.specialized.security.security_scanner_agent:SecurityScannerAgent",
+        "dependency_security=ci_code_companion_sdk.agents.specialized.security.dependency_security_agent:DependencySecurityAgent",
     ]
 }
 

@@ -587,6 +587,53 @@ class ResourceError(CICodeCompanionError):
         self.add_suggestion("Increase resource limits in configuration")
 
 
+class EngineError(CICodeCompanionError):
+    """
+    Exception raised during engine operations.
+    Handles errors in engine initialization, workflow execution, and orchestration.
+    """
+    
+    def __init__(
+        self,
+        message: str,
+        engine_component: Optional[str] = None,
+        workflow_type: Optional[str] = None,
+        operation: Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Initialize engine error with engine context.
+        
+        Args:
+            message: Error message
+            engine_component: Engine component that failed (if applicable)
+            workflow_type: Type of workflow that failed (if applicable)
+            operation: Specific operation that failed
+            **kwargs: Additional arguments for base exception
+        """
+        context = kwargs.get('context', {})
+        if engine_component:
+            context['engine_component'] = engine_component
+        if workflow_type:
+            context['workflow_type'] = workflow_type
+        if operation:
+            context['operation'] = operation
+        
+        kwargs['context'] = context
+        super().__init__(message, **kwargs)
+        
+        # Add common suggestions for engine errors
+        if not self.suggestions:
+            self._add_engine_suggestions()
+    
+    def _add_engine_suggestions(self):
+        """Add common suggestions for engine errors"""
+        self.add_suggestion("Check engine initialization and configuration")
+        self.add_suggestion("Verify that all required agents are registered")
+        self.add_suggestion("Check system resources and memory availability")
+        self.add_suggestion("Review error logs for detailed troubleshooting")
+
+
 def aggregate_exceptions(exceptions: List[Exception]) -> CICodeCompanionError:
     """
     Aggregate multiple exceptions into a single comprehensive error.

@@ -341,50 +341,77 @@ class SDKConfig:
     def _setup_agent_config(self):
         """
         Setup agent-specific configurations with intelligent defaults.
-        Configures each agent type with appropriate settings based on the environment.
+        Configures each specialized agent type with appropriate settings based on the environment.
         """
         default_agent_configs = {
-            'react': {
+            # Code Development Agents
+            'react_code': {
                 'enabled': True,
                 'timeout': self.agent_timeout,
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['jsx_analysis', 'hooks_validation', 'performance_check'],
-                'frameworks': ['react', 'next.js', 'gatsby']
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['jsx_analysis', 'hooks_validation', 'performance_check', 'component_analysis'],
+                'frameworks': ['react', 'next.js', 'gatsby'],
+                'category': 'code'
             },
-            'python': {
+            'python_code': {
                 'enabled': True,
                 'timeout': self.agent_timeout,
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['syntax_check', 'pep8_validation', 'security_scan'],
-                'frameworks': ['django', 'flask', 'fastapi', 'pytest']
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['syntax_check', 'pep8_validation', 'performance_analysis', 'framework_detection'],
+                'frameworks': ['django', 'flask', 'fastapi', 'asyncio'],
+                'category': 'code'
             },
-            'node': {
+            'node_code': {
                 'enabled': True,
                 'timeout': self.agent_timeout,
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['eslint_integration', 'security_audit', 'dependency_check'],
-                'frameworks': ['express', 'nestjs', 'koa']
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['api_analysis', 'middleware_check', 'async_patterns', 'security_audit'],
+                'frameworks': ['express', 'fastify', 'koa', 'nestjs'],
+                'category': 'code'
             },
-            'database': {
+            
+            # Testing Agents
+            'react_test': {
                 'enabled': True,
-                'timeout': self.agent_timeout * 2,  # Database analysis may take longer
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['query_optimization', 'schema_validation', 'index_analysis'],
-                'supported_dbs': ['postgresql', 'mysql', 'sqlite', 'mongodb']
+                'timeout': self.agent_timeout * 2,  # Testing may take longer
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['unit_testing', 'component_testing', 'integration_testing', 'test_generation'],
+                'frameworks': ['jest', 'react-testing-library', 'enzyme', 'cypress'],
+                'category': 'testing'
             },
-            'devops': {
+            'python_test': {
                 'enabled': True,
-                'timeout': self.agent_timeout,
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['dockerfile_analysis', 'yaml_validation', 'security_check'],
-                'tools': ['docker', 'kubernetes', 'terraform', 'ansible']
+                'timeout': self.agent_timeout * 2,  # Testing may take longer
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['pytest_support', 'unittest_support', 'test_generation', 'mock_analysis'],
+                'frameworks': ['pytest', 'unittest', 'nose2', 'coverage'],
+                'category': 'testing'
             },
-            'mobile': {
+            'api_test': {
                 'enabled': True,
-                'timeout': self.agent_timeout,
-                'memory_limit': self.agent_memory_limit // 6,
-                'features': ['performance_analysis', 'platform_compliance', 'security_check'],
-                'platforms': ['react-native', 'flutter', 'ionic']
+                'timeout': self.agent_timeout * 2,  # API testing may take longer
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['rest_testing', 'graphql_testing', 'auth_testing', 'performance_testing'],
+                'frameworks': ['postman', 'newman', 'rest-assured', 'supertest'],
+                'category': 'testing'
+            },
+            
+            # Security Agents
+            'security_scanner': {
+                'enabled': self.enable_security_scan,
+                'timeout': self.agent_timeout * 3,  # Security scans may take longer
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['vulnerability_scan', 'code_analysis', 'pattern_detection', 'compliance_check'],
+                'tools': ['bandit', 'eslint-security', 'semgrep', 'sonarqube'],
+                'category': 'security'
+            },
+            'dependency_security': {
+                'enabled': self.enable_dependency_analysis,
+                'timeout': self.agent_timeout * 2,  # Dependency scans may take longer
+                'memory_limit': self.agent_memory_limit // 8,
+                'features': ['vulnerability_check', 'license_compliance', 'supply_chain_analysis', 'outdated_packages'],
+                'tools': ['npm_audit', 'snyk', 'safety', 'dependabot'],
+                'category': 'security'
             }
         }
         
