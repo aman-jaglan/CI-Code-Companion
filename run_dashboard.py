@@ -19,10 +19,11 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / 'web_dashboard'))
 
 # Import new SDK
-from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
-from ci_code_companion_sdk.core.exceptions import SDKError, ConfigurationError
+from ci_code_companion_sdk import CICodeCompanionEngine, SDKConfig
+from ci_code_companion_sdk.core.exceptions import CICodeCompanionError, ConfigurationError
 from web_dashboard.routes.api import api, init_database
 from web_dashboard.routes.gitlab_api import gitlab_bp, init_gitlab
+from web_dashboard.routes.gitlab_routes import gitlab_bp as gitlab_oauth_bp
 
 def create_app():
     # Initialize Flask app with correct template and static folders
@@ -36,8 +37,8 @@ def create_app():
     
     # Initialize SDK
     try:
-        sdk_config = SDKConfig()
-        sdk = CICodeCompanionSDK(config=sdk_config)
+        sdk_config = {}  # Use empty dict - SDKConfig will load from environment
+        sdk = CICodeCompanionEngine(config=sdk_config)
         app.sdk = sdk  # Attach SDK to app
         app.logger.info("CI Code Companion SDK initialized successfully")
     except ConfigurationError as e:
@@ -50,8 +51,11 @@ def create_app():
     # Register API blueprint
     app.register_blueprint(api)
     
-    # Register GitLab API blueprint
-    app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
+    # Register GitLab API blueprint (for file operations)
+    app.register_blueprint(gitlab_bp, url_prefix='/gitlab/api')
+    
+    # Register GitLab OAuth blueprint for authentication (for connect/auth operations)
+    app.register_blueprint(gitlab_oauth_bp, url_prefix='/gitlab')
     
     # Initialize GitLab connection
     gitlab_url = os.getenv('GITLAB_URL', 'https://gitlab.com')
@@ -175,7 +179,7 @@ def create_app():
                 app.logger.info(f"SDK operation '{action}' completed for {file_path}")
                 return jsonify(response_payload)
                 
-            except SDKError as e:
+            except CICodeCompanionError as e:
                 app.logger.error(f"SDK error during '{action}' for {file_path}: {str(e)}")
                 return jsonify({'error': f'SDK operation failed: {str(e)}'}), 500
             except Exception as e:

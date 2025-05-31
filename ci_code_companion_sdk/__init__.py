@@ -50,6 +50,10 @@ The SDK is designed for production use with comprehensive error handling,
 logging, monitoring, and performance optimization.
 """
 
+import logging
+import sys
+import platform
+
 # Version information
 __version__ = "1.0.0"
 __author__ = "CI Code Companion Team"
@@ -88,7 +92,6 @@ from .models.analysis_model import (
     OptimizationType
 )
 from .models.file_model import FileInfo, ProjectInfo
-from .models.project_model import ProjectInfo
 
 # Agent exports
 from .agents.base_agent import BaseAgent, AgentCapability
@@ -333,8 +336,7 @@ def configure_logging(level='INFO', format_type='structured', file_path=None):
 
 
 # Import required modules for version info
-import sys
-import platform
+# Removed duplicate imports: import sys, import platform (moved to top)
 
 # Initialize default logging
 _default_logger = configure_logging()

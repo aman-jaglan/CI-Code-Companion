@@ -91,7 +91,61 @@ class SDKConfig:
         Args:
             config_dict: Optional configuration dictionary to override defaults
         """
-        # Load configuration from multiple sources
+        # Initialize all dataclass fields with their defaults first
+        # This ensures all attributes exist before any method calls
+        
+        # GitLab Integration
+        self.gitlab_url = os.getenv('GITLAB_URL', 'https://gitlab.com')
+        self.gitlab_token = os.getenv('GITLAB_TOKEN', '')
+        self.gitlab_timeout = int(os.getenv('GITLAB_TIMEOUT', '30'))
+        self.gitlab_retries = int(os.getenv('GITLAB_RETRIES', '3'))
+        
+        # Logging Configuration
+        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
+        self.log_file = os.getenv('LOG_FILE')
+        self.log_format = os.getenv('LOG_FORMAT', 'structured')
+        self.log_max_size = int(os.getenv('LOG_MAX_SIZE', str(10*1024*1024)))
+        self.log_backup_count = int(os.getenv('LOG_BACKUP_COUNT', '5'))
+        
+        # Performance Configuration
+        self.max_workers = int(os.getenv('MAX_WORKERS', '4'))
+        self.agent_timeout = int(os.getenv('AGENT_TIMEOUT', '60'))
+        self.file_size_limit = int(os.getenv('FILE_SIZE_LIMIT', str(10*1024*1024)))
+        self.cache_enabled = os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
+        self.cache_ttl = int(os.getenv('CACHE_TTL', '3600'))
+        
+        # Agent Configuration
+        self.agent_config = {}
+        self.default_agent = os.getenv('DEFAULT_AGENT', 'general')
+        self.parallel_agent_execution = os.getenv('PARALLEL_AGENTS', 'true').lower() == 'true'
+        self.agent_memory_limit = int(os.getenv('AGENT_MEMORY_LIMIT', str(512*1024*1024)))
+        
+        # Security Configuration
+        self.enable_security_scan = os.getenv('ENABLE_SECURITY_SCAN', 'true').lower() == 'true'
+        self.allowed_file_types = _parse_list(os.getenv('ALLOWED_FILE_TYPES', 'py,js,ts,jsx,tsx,java,cpp,c,go,rs,rb,php'))
+        self.blocked_patterns = _parse_list(os.getenv('BLOCKED_PATTERNS', '__pycache__,node_modules,.git'))
+        
+        # Database Configuration  
+        self.database_url = os.getenv('DATABASE_URL', 'sqlite:///ci_code_companion.db')
+        self.database_pool_size = int(os.getenv('DATABASE_POOL_SIZE', '5'))
+        self.database_timeout = int(os.getenv('DATABASE_TIMEOUT', '30'))
+        
+        # API Configuration
+        self.api_rate_limit = int(os.getenv('API_RATE_LIMIT', '100'))
+        self.api_timeout = int(os.getenv('API_TIMEOUT', '30'))
+        self.api_retries = int(os.getenv('API_RETRIES', '3'))
+        
+        # Feature Flags
+        self.enable_ai_analysis = os.getenv('ENABLE_AI_ANALYSIS', 'true').lower() == 'true'
+        self.enable_test_generation = os.getenv('ENABLE_TEST_GENERATION', 'true').lower() == 'true'
+        self.enable_code_optimization = os.getenv('ENABLE_CODE_OPTIMIZATION', 'true').lower() == 'true'
+        self.enable_dependency_analysis = os.getenv('ENABLE_DEPENDENCY_ANALYSIS', 'true').lower() == 'true'
+        
+        # Environment
+        self.environment = os.getenv('ENVIRONMENT', 'development')
+        self.debug_mode = os.getenv('DEBUG', 'false').lower() == 'true'
+        
+        # Now that all attributes are initialized, load configuration from other sources
         self._load_default_config()
         self._load_environment_config()
         
