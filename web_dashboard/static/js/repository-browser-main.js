@@ -98,6 +98,14 @@ function repositoryBrowser() {
                 // Add window resize handler for Monaco editor
                 this.setupWindowResizeHandler();
                 
+                // Pre-warm Monaco workers for better performance
+                console.log('🔥 Starting Monaco pre-warming...');
+                this.preWarmMonacoWorkers().then(() => {
+                    console.log('🟩 Monaco pre-warming completed');
+                }).catch(error => {
+                    console.warn('🟨 Monaco pre-warming failed:', error);
+                });
+                
                 console.log('Repository Browser initialized successfully');
             } catch (error) {
                 console.error('Error initializing Repository Browser:', error);

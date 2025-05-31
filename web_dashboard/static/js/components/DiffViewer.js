@@ -49,22 +49,48 @@ class DiffViewer {
     }
 
     async loadMonaco() {
-        if (typeof monaco === 'undefined') {
-            return new Promise((resolve, reject) => {
+        // Use the global Monaco loader to prevent conflicts
+        if (window.monaco) {
+            this.configureMonaco();
+            return Promise.resolve();
+        }
+        
+        if (window._monacoLoading) {
+            await window._monacoLoading;
+            this.configureMonaco();
+            return;
+        }
+        
+        // If global loader is not available, fall back to basic loading
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Monaco loading timed out'));
+            }, 15000);
+            
+            const cleanup = () => {
+                clearTimeout(timeout);
+            };
+            
+            // Only configure require.js once globally
+            if (!window._requireConfigured) {
                 require.config({ 
                     paths: { 
                         'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' 
-                    }
+                    },
+                    waitSeconds: 15
                 });
-                
-                require(['vs/editor/editor.main'], () => {
-                    this.configureMonaco();
-                    resolve();
-                }, reject);
+                window._requireConfigured = true;
+            }
+            
+            require(['vs/editor/editor.main'], () => {
+                cleanup();
+                this.configureMonaco();
+                resolve();
+            }, (error) => {
+                cleanup();
+                reject(error);
             });
-        } else {
-            this.configureMonaco();
-        }
+        });
     }
 
     configureMonaco() {

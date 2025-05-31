@@ -15,6 +15,28 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.js"></script>
     
+    <!-- Monaco Global Initialization - Prevent require.config conflicts -->
+    <script>
+        // Global Monaco initialization to prevent conflicts
+        window._requireConfigured = false;
+        window._monacoLoading = null;
+        
+        // Ensure require.js is properly configured only once
+        window.ensureRequireConfig = function() {
+            if (!window._requireConfigured) {
+                require.config({ 
+                    paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' },
+                    waitSeconds: 15
+                });
+                window._requireConfigured = true;
+                console.log('require.js configured globally');
+            }
+        };
+        
+        // Call immediately to set up config
+        window.ensureRequireConfig();
+    </script>
+    
     <!-- Vis.js Network for dependency graphs -->
     <script src="https://cdn.jsdelivr.net/npm/vis-data@7.1.4/standalone/umd/vis-data.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
