@@ -75,106 +75,19 @@ class AgentManager:
     def _initialize_builtin_agents(self):
         """
         Initialize and register built-in agents.
-        Loads all standard agents provided by the SDK.
+        Note: This agent manager is deprecated in favor of specialized agents.
+        Use SpecializedEngine and AgentOrchestrator for new implementations.
         """
-        builtin_agents = {
-            'react': {
-                'module': 'ci_code_companion_sdk.agents.react_agent',
-                'class': 'ReactAgent',
-                'patterns': {
-                    'extensions': ['.jsx', '.tsx', '.js', '.ts'],
-                    'frameworks': ['react', 'next.js', 'gatsby'],
-                    'content_patterns': [
-                        r'import\s+.*\s+from\s+[\'"]react[\'"]',
-                        r'from\s+[\'"]react[\'"]',
-                        r'useState|useEffect|useContext',
-                        r'React\.Component|React\.FC',
-                        r'export\s+default\s+.*Component'
-                    ]
-                }
-            },
-            'python': {
-                'module': 'ci_code_companion_sdk.agents.python_agent',
-                'class': 'PythonAgent',
-                'patterns': {
-                    'extensions': ['.py', '.pyx', '.pyi'],
-                    'frameworks': ['django', 'flask', 'fastapi', 'pytest'],
-                    'content_patterns': [
-                        r'from\s+django',
-                        r'from\s+flask',
-                        r'from\s+fastapi',
-                        r'import\s+pytest',
-                        r'def\s+\w+\(',
-                        r'class\s+\w+\('
-                    ]
-                }
-            },
-            'node': {
-                'module': 'ci_code_companion_sdk.agents.node_agent',
-                'class': 'NodeAgent',
-                'patterns': {
-                    'extensions': ['.js', '.ts', '.mjs'],
-                    'frameworks': ['express', 'nestjs', 'koa', 'fastify'],
-                    'content_patterns': [
-                        r'require\([\'"]express[\'"]',
-                        r'from\s+[\'"]express[\'"]',
-                        r'app\.use|app\.get|app\.post',
-                        r'module\.exports',
-                        r'exports\.'
-                    ]
-                }
-            },
-            'database': {
-                'module': 'ci_code_companion_sdk.agents.database_agent',
-                'class': 'DatabaseAgent',
-                'patterns': {
-                    'extensions': ['.sql', '.py', '.js', '.ts'],
-                    'frameworks': ['sqlalchemy', 'sequelize', 'prisma', 'mongoose'],
-                    'content_patterns': [
-                        r'SELECT\s+.*\s+FROM',
-                        r'CREATE\s+TABLE',
-                        r'INSERT\s+INTO',
-                        r'UPDATE\s+.*\s+SET',
-                        r'DELETE\s+FROM',
-                        r'from\s+sqlalchemy',
-                        r'mongoose\.'
-                    ]
-                }
-            },
-            'devops': {
-                'module': 'ci_code_companion_sdk.agents.devops_agent',
-                'class': 'DevOpsAgent',
-                'patterns': {
-                    'extensions': ['.yml', '.yaml', '.dockerfile', '.sh', '.tf'],
-                    'frameworks': ['docker', 'kubernetes', 'terraform', 'ansible'],
-                    'content_patterns': [
-                        r'FROM\s+\w+',
-                        r'RUN\s+',
-                        r'COPY\s+',
-                        r'apiVersion:',
-                        r'kind:\s+Deployment',
-                        r'resource\s+[\'"].*[\'"]',
-                        r'provider\s+[\'"].*[\'"]'
-                    ]
-                }
-            },
-            'mobile': {
-                'module': 'ci_code_companion_sdk.agents.mobile_agent',
-                'class': 'MobileAgent',
-                'patterns': {
-                    'extensions': ['.dart', '.swift', '.kt', '.java', '.tsx', '.ts'],
-                    'frameworks': ['flutter', 'react-native', 'ionic', 'xamarin'],
-                    'content_patterns': [
-                        r'import\s+[\'"]react-native[\'"]',
-                        r'from\s+[\'"]react-native[\'"]',
-                        r'import\s+\'package:flutter',
-                        r'@ionic/angular',
-                        r'import.*UIKit',
-                        r'import.*android'
-                    ]
-                }
-            }
-        }
+        # Legacy agent manager - specialized agents are handled by AgentOrchestrator
+        # This is maintained for backward compatibility only
+        
+        self.logger.warning(
+            "Using legacy AgentManager. Consider migrating to SpecializedEngine "
+            "with AgentOrchestrator for better performance and functionality."
+        )
+        
+        # No builtin agents - all functionality moved to specialized agents
+        builtin_agents = {}
         
         for agent_type, config in builtin_agents.items():
             try:
