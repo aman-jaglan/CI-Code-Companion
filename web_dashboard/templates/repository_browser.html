@@ -14,6 +14,11 @@
     <!-- Scripts -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.js"></script>
+    
+    <!-- Vis.js Network for dependency graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/vis-data@7.1.4/standalone/umd/vis-data.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+    
     <script src="{{ url_for('static', filename='js/repository-browser-core.js') }}"></script>
     <script src="{{ url_for('static', filename='js/monaco-utils.js') }}"></script>
     <script src="{{ url_for('static', filename='js/repository-browser-main.js') }}"></script>
@@ -417,6 +422,98 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Dependency Graph Section -->
+                <div class="sidebar-section">
+                    <div class="section-header" @click="toggleSection('dependencies')" 
+                         :class="{'collapsed': collapsedSections.dependencies}">
+                        <div class="flex items-center">
+                            <i class="section-icon fas fa-project-diagram"></i>
+                            <span>DEPENDENCY GRAPH</span>
+                        </div>
+                        <i class="expand-icon fas fa-chevron-down" 
+                           :class="{'collapsed': collapsedSections.dependencies}"></i>
+                    </div>
+                    
+                    <div class="section-content" :class="{'collapsed': collapsedSections.dependencies}">
+                        <!-- Graph Controls -->
+                        <div class="p-3 border-b border-gray-600">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs font-medium text-gray-300">GRAPH VIEW</span>
+                                <button @click="loadDependencyGraph()" 
+                                        :disabled="loadingGraph"
+                                        class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-white">
+                                    <i :class="loadingGraph ? 'fas fa-spinner fa-spin' : 'fas fa-sync'"></i>
+                                    <span x-text="loadingGraph ? 'Loading...' : 'Refresh'"></span>
+                                </button>
+                            </div>
+                            
+                            <!-- Graph Type Filter -->
+                            <div class="flex space-x-2 text-xs">
+                                <button @click="graphFilter = 'all'" 
+                                        :class="{'bg-blue-600 text-white': graphFilter === 'all', 'bg-gray-600 text-gray-300': graphFilter !== 'all'}"
+                                        class="px-2 py-1 rounded">All</button>
+                                <button @click="graphFilter = 'imports'" 
+                                        :class="{'bg-blue-600 text-white': graphFilter === 'imports', 'bg-gray-600 text-gray-300': graphFilter !== 'imports'}"
+                                        class="px-2 py-1 rounded">Imports</button>
+                                <button @click="graphFilter = 'functions'" 
+                                        :class="{'bg-blue-600 text-white': graphFilter === 'functions', 'bg-gray-600 text-gray-300': graphFilter !== 'functions'}"
+                                        class="px-2 py-1 rounded">Functions</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Mini Graph Preview -->
+                        <div class="graph-preview-container" style="height: 200px; position: relative;">
+                            <div x-show="!dependencyGraph || dependencyGraph.nodes.length === 0" 
+                                 class="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">
+                                <div class="text-center">
+                                    <i class="fas fa-project-diagram text-2xl mb-2"></i>
+                                    <p>Click "Refresh" to generate<br>dependency graph</p>
+                                </div>
+                            </div>
+                            
+                            <div x-show="loadingGraph" 
+                                 class="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50">
+                                <div class="text-center text-gray-300">
+                                    <i class="fas fa-spinner fa-spin text-xl mb-2"></i>
+                                    <p class="text-xs">Analyzing dependencies...</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Graph Canvas -->
+                            <canvas id="dependency-graph-mini" 
+                                    x-show="dependencyGraph && dependencyGraph.nodes.length > 0"
+                                    class="w-full h-full cursor-pointer"
+                                    @click="openFullGraphView()"></canvas>
+                        </div>
+                        
+                        <!-- Graph Stats -->
+                        <div x-show="dependencyGraph && dependencyGraph.nodes.length > 0" 
+                             class="p-3 border-t border-gray-600">
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-gray-700 rounded p-2 text-center">
+                                    <div class="font-bold text-blue-400" x-text="dependencyGraph.nodes.length"></div>
+                                    <div class="text-gray-400">Files</div>
+                                </div>
+                                <div class="bg-gray-700 rounded p-2 text-center">
+                                    <div class="font-bold text-green-400" x-text="dependencyGraph.edges.length"></div>
+                                    <div class="text-gray-400">Connections</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Most Connected Files -->
+                            <div class="mt-2">
+                                <div class="text-xs font-medium text-gray-300 mb-1">MOST CONNECTED</div>
+                                <template x-for="file in getTopConnectedFiles()" :key="file.id">
+                                    <div class="flex items-center justify-between text-xs py-1">
+                                        <span class="truncate flex-1 text-gray-300" x-text="file.name"></span>
+                                        <span class="text-blue-400 font-medium" x-text="file.connections"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -761,5 +858,282 @@
             </div>
         </div>
     </div>
+
+    <!-- Full Dependency Graph Modal -->
+    <div x-show="showGraphModal" 
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 overflow-hidden bg-black bg-opacity-75 flex items-center justify-center">
+        
+        <div class="bg-gray-900 w-full h-full flex flex-col">
+            <!-- Graph Modal Header -->
+            <div class="bg-gray-800 px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <h2 class="text-xl font-bold text-white">
+                        <i class="fas fa-project-diagram mr-2 text-blue-400"></i>
+                        Dependency Graph
+                    </h2>
+                    <div class="text-sm text-gray-400" x-text="projectName"></div>
+                </div>
+                
+                <!-- Graph Controls -->
+                <div class="flex items-center space-x-4">
+                    <!-- Layout Controls -->
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-300">Layout:</label>
+                        <select x-model="graphLayout" @change="updateGraphLayout()" 
+                                class="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600">
+                            <option value="force">Force Directed</option>
+                            <option value="hierarchical">Hierarchical</option>
+                            <option value="circular">Circular</option>
+                            <option value="grid">Grid</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Filter Controls -->
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-300">Show:</label>
+                        <div class="flex space-x-1">
+                            <button @click="toggleGraphFilter('imports')" 
+                                    :class="{'bg-green-600': graphFilters.imports, 'bg-gray-600': !graphFilters.imports}"
+                                    class="px-2 py-1 text-xs text-white rounded">Imports</button>
+                            <button @click="toggleGraphFilter('functions')" 
+                                    :class="{'bg-blue-600': graphFilters.functions, 'bg-gray-600': !graphFilters.functions}"
+                                    class="px-2 py-1 text-xs text-white rounded">Functions</button>
+                            <button @click="toggleGraphFilter('classes')" 
+                                    :class="{'bg-purple-600': graphFilters.classes, 'bg-gray-600': !graphFilters.classes}"
+                                    class="px-2 py-1 text-xs text-white rounded">Classes</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Close Button -->
+                    <button @click="showGraphModal = false" 
+                            class="text-gray-400 hover:text-white p-2 rounded hover:bg-gray-700">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Graph Content -->
+            <div class="flex-1 flex">
+                <!-- Main Graph Area -->
+                <div class="flex-1 relative">
+                    <div id="dependency-graph-full" class="w-full h-full"></div>
+                    
+                    <!-- Graph Loading -->
+                    <div x-show="loadingFullGraph" 
+                         class="absolute inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center">
+                        <div class="text-center text-white">
+                            <i class="fas fa-spinner fa-spin text-4xl mb-4"></i>
+                            <p class="text-lg">Building dependency graph...</p>
+                            <p class="text-sm text-gray-400 mt-2">Analyzing file relationships</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Graph Information Panel -->
+                <div class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col">
+                    <!-- Selected Node Info -->
+                    <div class="p-4 border-b border-gray-700">
+                        <h3 class="font-medium text-white mb-2">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            Node Information
+                        </h3>
+                        
+                        <div x-show="selectedNode" class="space-y-2">
+                            <div class="text-sm">
+                                <span class="text-gray-400">File:</span>
+                                <span class="text-white font-mono text-xs" x-text="selectedNode?.name"></span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-gray-400">Type:</span>
+                                <span class="text-blue-400" x-text="selectedNode?.type"></span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-gray-400">Connections:</span>
+                                <span class="text-green-400" x-text="selectedNode?.connections"></span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-gray-400">Dependencies:</span>
+                                <span class="text-yellow-400" x-text="selectedNode?.dependencies?.length || 0"></span>
+                            </div>
+                        </div>
+                        
+                        <div x-show="!selectedNode" class="text-sm text-gray-400">
+                            Click on a node to see details
+                        </div>
+                    </div>
+                    
+                    <!-- Connected Files -->
+                    <div class="p-4 border-b border-gray-700">
+                        <h3 class="font-medium text-white mb-2">
+                            <i class="fas fa-link mr-2"></i>
+                            Connected Files
+                        </h3>
+                        
+                        <div x-show="selectedNode && selectedNode.connections > 0" 
+                             class="space-y-1 max-h-40 overflow-y-auto">
+                            <template x-for="connection in getNodeConnections(selectedNode)" :key="connection.id">
+                                <div class="flex items-center justify-between text-xs py-1 px-2 bg-gray-700 rounded">
+                                    <span class="truncate flex-1 text-gray-300" x-text="connection.name"></span>
+                                    <span :class="getConnectionTypeColor(connection.type)" x-text="connection.type"></span>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <div x-show="!selectedNode || selectedNode.connections === 0" 
+                             class="text-sm text-gray-400">
+                            No connections
+                        </div>
+                    </div>
+                    
+                    <!-- Graph Statistics -->
+                    <div class="p-4 flex-1">
+                        <h3 class="font-medium text-white mb-2">
+                            <i class="fas fa-chart-bar mr-2"></i>
+                            Graph Statistics
+                        </h3>
+                        
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Total Files:</span>
+                                <span class="text-blue-400" x-text="dependencyGraph?.nodes?.length || 0"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Connections:</span>
+                                <span class="text-green-400" x-text="dependencyGraph?.edges?.length || 0"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Avg. Connections:</span>
+                                <span class="text-yellow-400" x-text="getAverageConnections()"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Max Connections:</span>
+                                <span class="text-red-400" x-text="getMaxConnections()"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Graph Actions -->
+                        <div class="mt-4 space-y-2">
+                            <button @click="exportGraph()" 
+                                    class="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
+                                <i class="fas fa-download mr-2"></i>
+                                Export Graph
+                            </button>
+                            <button @click="centerGraph()" 
+                                    class="w-full bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded text-sm">
+                                <i class="fas fa-crosshairs mr-2"></i>
+                                Center View
+                            </button>
+                            <button @click="refreshDependencyCache()" 
+                                    class="w-full bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-sm">
+                                <i class="fas fa-refresh mr-2"></i>
+                                Refresh Cache
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Library loading detection and fallback -->
+    <script>
+        // Global flag to track vis-network availability
+        window.visNetworkLoaded = false;
+        
+        // Function to check if vis-network is properly loaded
+        function checkVisNetwork() {
+            if (typeof vis !== 'undefined' && vis.Network && vis.DataSet) {
+                window.visNetworkLoaded = true;
+                console.log('✅ vis-network library loaded successfully');
+                console.log('Available vis objects:', Object.keys(vis));
+                
+                // Dispatch custom event when loaded
+                window.dispatchEvent(new CustomEvent('visNetworkReady'));
+                return true;
+            }
+            return false;
+        }
+        
+        // Check immediately
+        if (!checkVisNetwork()) {
+            // Wait for scripts to load
+            window.addEventListener('load', function() {
+                setTimeout(() => {
+                    if (!checkVisNetwork()) {
+                        console.error('❌ vis-network library failed to load');
+                        console.log('Will use fallback graph visualization');
+                        
+                        // Create a minimal vis polyfill for basic functionality
+                        window.vis = {
+                            DataSet: function(data) {
+                                this.data = data || [];
+                                this.get = () => this.data;
+                                this.add = (item) => this.data.push(item);
+                                this.update = (item) => console.log('DataSet update:', item);
+                                this.remove = (id) => console.log('DataSet remove:', id);
+                            },
+                            Network: function(container, data, options) {
+                                this.container = container;
+                                this.data = data;
+                                this.options = options;
+                                
+                                // Simple fallback rendering
+                                this.renderFallback();
+                                
+                                // Mock methods
+                                this.on = (event, callback) => console.log('Network event:', event);
+                                this.fit = () => console.log('Network fit');
+                                this.destroy = () => {
+                                    if (this.container) {
+                                        this.container.innerHTML = '';
+                                    }
+                                };
+                            }
+                        };
+                        
+                        // Add renderFallback method to Network prototype
+                        window.vis.Network.prototype.renderFallback = function() {
+                            if (!this.container) return;
+                            
+                            const nodeCount = this.data.nodes ? this.data.nodes.length || this.data.nodes.get().length : 0;
+                            const edgeCount = this.data.edges ? this.data.edges.length || this.data.edges.get().length : 0;
+                            
+                            this.container.innerHTML = `
+                                <div class="h-full flex items-center justify-center bg-gray-800 rounded-lg border border-gray-600">
+                                    <div class="text-center text-gray-300 p-8">
+                                        <i class="fas fa-project-diagram text-4xl mb-4 text-blue-400"></i>
+                                        <h3 class="text-lg font-medium mb-2">Dependency Graph</h3>
+                                        <div class="space-y-2 text-sm">
+                                            <div class="flex justify-center space-x-6">
+                                                <div class="text-center">
+                                                    <div class="text-xl font-bold text-blue-400">${nodeCount}</div>
+                                                    <div class="text-xs text-gray-400">Files</div>
+                                                </div>
+                                                <div class="text-center">
+                                                    <div class="text-xl font-bold text-green-400">${edgeCount}</div>
+                                                    <div class="text-xs text-gray-400">Connections</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-4">Interactive graph visualization unavailable</p>
+                                        <p class="text-xs text-gray-500">Using fallback display</p>
+                                    </div>
+                                </div>
+                            `;
+                        };
+                        
+                        window.visNetworkLoaded = 'fallback';
+                        window.dispatchEvent(new CustomEvent('visNetworkReady'));
+                    }
+                }, 1000);
+            });
+        }
+    </script>
 </body>
 </html> 
