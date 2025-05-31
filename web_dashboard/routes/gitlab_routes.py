@@ -16,7 +16,7 @@ from functools import wraps # Import wraps for creating decorators
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-gitlab_bp = Blueprint('gitlab', __name__)
+gitlab_bp = Blueprint('gitlab_oauth', __name__)
 gitlab_config = GitLabConfig()
 
 def get_gitlab_instance():
