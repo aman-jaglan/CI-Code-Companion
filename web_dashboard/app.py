@@ -8,6 +8,7 @@ from flask_cors import CORS
 import json
 import os
 import logging
+import asyncio
 from datetime import datetime
 from routes.gitlab_api import gitlab_bp, init_gitlab
 from config.gitlab_config import GitLabConfig
@@ -68,61 +69,45 @@ else:
 # Register GitLab blueprint with the correct URL prefix
 app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
 
-# Import AI agents
+# Import CI Code Companion SDK
 try:
-    from ai_agents.multi_tech_agents import (
-        analyze_react_file, analyze_python_file, analyze_node_file, analyze_database_file,
-        analyze_devops_file, analyze_mobile_file, analyze_general_file,
-        generate_react_tests, generate_python_tests, generate_node_tests, generate_database_tests,
-        generate_devops_tests, generate_mobile_tests, generate_general_tests,
-        optimize_react_code, optimize_python_code, optimize_node_code, optimize_database_code,
-        optimize_devops_code, optimize_mobile_code, optimize_general_code,
-        chat_react_expert, chat_python_expert, chat_node_expert, chat_database_expert,
-        chat_devops_expert, chat_mobile_expert, chat_general_expert,
-        get_complete_project_structure, analyze_project_structure
+    import sys
+    import os
+    # Add the parent directory to the path to import the SDK
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    
+    from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
+    from ci_code_companion_sdk.core.exceptions import SDKError, AnalysisError, ConfigurationError
+    
+    # Initialize SDK
+    sdk_config = SDKConfig(
+        ai_provider=os.getenv('AI_PROVIDER', 'vertex_ai'),
+        project_id=os.getenv('GCP_PROJECT_ID'),
+        region=os.getenv('GCP_REGION', 'us-central1'),
+        enable_caching=True,
+        max_concurrent_operations=5
     )
+    
+    ci_sdk = CICodeCompanionSDK(config=sdk_config)
+    logger.info("CI Code Companion SDK initialized successfully")
+    
 except ImportError as e:
-    print(f"Warning: AI agents not available: {e}")
-    # Create fallback functions
-    def fallback_function(*args, **kwargs):
-        return []
+    logger.error(f"Failed to import CI Code Companion SDK: {e}")
+    ci_sdk = None
+except Exception as e:
+    logger.error(f"Failed to initialize CI Code Companion SDK: {e}")
+    ci_sdk = None
+
+def run_async(coro):
+    """Helper function to run async functions in Flask routes"""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
     
-    # Set all functions to fallback
-    analyze_react_file = analyze_python_file = analyze_node_file = fallback_function
-    analyze_database_file = analyze_devops_file = analyze_mobile_file = fallback_function
-    analyze_general_file = fallback_function
-    
-    def fallback_test_function(*args, **kwargs):
-        return {
-            'code': '// AI agents not available',
-            'explanation': 'AI functionality is currently unavailable',
-            'coverage_areas': [],
-            'framework': 'none'
-        }
-    
-    generate_react_tests = generate_python_tests = generate_node_tests = fallback_test_function
-    generate_database_tests = generate_devops_tests = generate_mobile_tests = fallback_test_function
-    generate_general_tests = fallback_test_function
-    
-    optimize_react_code = optimize_python_code = optimize_node_code = fallback_function
-    optimize_database_code = optimize_devops_code = optimize_mobile_code = fallback_function
-    optimize_general_code = fallback_function
-    
-    def fallback_chat_function(*args, **kwargs):
-        return "AI chat functionality is currently unavailable. Please check the AI agents configuration."
-    
-    chat_react_expert = chat_python_expert = chat_node_expert = fallback_chat_function
-    chat_database_expert = chat_devops_expert = chat_mobile_expert = fallback_chat_function
-    chat_general_expert = fallback_chat_function
-    
-    def fallback_structure_function(*args, **kwargs):
-        return {'files': [], 'directories': [], 'total_files': 0}
-    
-    def fallback_analysis_function(*args, **kwargs):
-        return {'organization_score': 0, 'suggestions': [], 'issues': []}
-    
-    get_complete_project_structure = fallback_structure_function
-    analyze_project_structure = fallback_analysis_function
+    return loop.run_until_complete(coro)
 
 @app.route('/app-test-route')
 def app_test_route():
@@ -149,10 +134,14 @@ def dashboard():
     gitlab_connected = 'gitlab_token' in session
     logger.info(f"GitLab connection status: {'Connected' if gitlab_connected else 'Not connected'}")
     
+    # Check SDK status
+    sdk_status = "Available" if ci_sdk else "Not Available"
+    
     return render_template(
         'dashboard.html',
         gitlab_configured=gitlab_config.is_configured,
-        gitlab_connected=gitlab_connected
+        gitlab_connected=gitlab_connected,
+        sdk_status=sdk_status
     )
 
 @app.route('/api/recent-analyses')
@@ -198,68 +187,60 @@ def analysis_data(analysis_id):
         "id": analysis_id,
         "project": "user-auth-service",
         "commit": "a1b2c3d",
-        "branch": "feature/user-validation",
-        "author": "john.doe@company.com",
         "timestamp": "2024-01-20 14:30:00",
-        "files_analyzed": ["auth.py", "validators.py", "models.py"],
-        "code_review": {
-            "overall_score": 8.5,
-            "suggestions": [
-                {
-                    "file": "auth.py",
-                    "line": 45,
-                    "type": "improvement",
-                    "message": "Consider adding type hints for better code clarity",
-                    "code": "def validate_user(username, password):"
-                },
-                {
-                    "file": "validators.py", 
-                    "line": 23,
-                    "type": "security",
-                    "message": "Potential SQL injection vulnerability",
-                    "code": "query = f'SELECT * FROM users WHERE name = {username}'"
-                }
-            ]
+        "overall_score": 8.5,
+        "metrics": {
+            "code_quality": 8.5,
+            "security_score": 7.2,
+            "performance_score": 8.0,
+            "maintainability": 9.0
         },
-        "generated_tests": [
+        "issues": [
             {
-                "file": "test_auth.py",
-                "function": "test_user_validation_success",
-                "coverage": "Happy path for user validation"
-            },
-            {
-                "file": "test_auth.py", 
-                "function": "test_user_validation_failure",
-                "coverage": "Invalid credentials handling"
+                "id": 1,
+                "type": "Security",
+                "severity": "High",
+                "description": "Potential SQL injection vulnerability in user query",
+                "file": "auth/models.py",
+                "line": 45,
+                "suggestion": "Use parameterized queries instead of string concatenation"
             }
         ],
-        "security_analysis": {
-            "score": 7.2,
-            "vulnerabilities": [
-                {
-                    "severity": "high",
-                    "type": "SQL Injection",
-                    "file": "validators.py",
-                    "line": 23,
-                    "description": "User input directly concatenated into SQL query"
-                }
-            ]
-        }
+        "tests_generated": [
+            {
+                "file": "auth/test_models.py",
+                "framework": "pytest",
+                "test_cases": 8,
+                "coverage_area": "User authentication logic"
+            }
+        ]
     }
     return jsonify(sample_detail)
 
 @app.route('/api/connected-projects')
 def connected_projects():
-    """API endpoint for listing connected GitLab projects."""
+    """API endpoint for GitLab projects."""
     if 'gitlab_token' not in session:
         return jsonify([])
-        
+    
     try:
-        # Use the gitlab_api blueprint to get projects
-        from routes.gitlab_api import get_projects
-        return get_projects()
+        import gitlab
+        gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
+        projects = gl.projects.list(owned=True, all=True)
+        
+        project_list = []
+        for project in projects[:10]:  # Limit to 10 projects for performance
+            project_list.append({
+                'id': project.id,
+                'name': project.name,
+                'web_url': project.web_url,
+                'last_activity_at': project.last_activity_at
+            })
+        
+        return jsonify(project_list)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error fetching GitLab projects: {str(e)}")
+        return jsonify([])
 
 @app.route('/api/gitlab/status')
 def gitlab_status():
@@ -267,18 +248,24 @@ def gitlab_status():
     if 'gitlab_token' not in session:
         return jsonify({
             'connected': False,
-            'message': 'No GitLab token found'
+            'user': None,
+            'error': 'No GitLab token found'
         })
     
     try:
         import gitlab
         gl = gitlab.Gitlab('https://gitlab.com', oauth_token=session['gitlab_token'])
         gl.auth()
-        user = gl.user
+        current_user = gl.user
+        
         return jsonify({
             'connected': True,
-            'user': user.username,
-            'email': user.email
+            'user': {
+                'username': current_user.username,
+                'name': current_user.name,
+                'avatar_url': current_user.avatar_url
+            },
+            'error': None
         })
     except Exception as e:
         logger.error(f"GitLab status check failed: {str(e)}")
@@ -286,537 +273,337 @@ def gitlab_status():
         session.pop('gitlab_token', None)
         return jsonify({
             'connected': False,
-            'message': str(e)
+            'user': None,
+            'error': str(e)
         })
 
 @app.route('/repository')
 def repository_browser():
-    """Repository browser interface."""
-    if 'gitlab_token' not in session:
-        return redirect(url_for('dashboard'))
-    
-    return render_template('repository_browser.html')
+    """Repository browser page."""
+    return render_template('repository.html')
 
 @app.route('/api/ai-analyze', methods=['POST'])
 def ai_analyze():
-    """AI analysis endpoint for repository browser."""
-    if 'gitlab_token' not in session:
-        return jsonify({'error': 'Not authenticated with GitLab'}), 401
+    """Comprehensive AI analysis using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
     
     try:
-        data = request.json
-        action = data.get('action')
-        file_path = data.get('file_path')
-        content = data.get('content')
-        project_id = data.get('project_id')
-        branch = data.get('branch')
+        data = request.get_json()
+        code = data.get('code', '')
+        file_path = data.get('file_path', 'unknown.py')
         language = data.get('language', 'python')
         
-        if not all([action, file_path, content]):
-            return jsonify({'error': 'Missing required parameters'}), 400
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "No code provided for analysis"
+            }), 400
         
-        # Import AI components
-        from src.ci_code_companion.vertex_ai_client import VertexAIClient
-        from src.ci_code_companion.code_reviewer import CodeReviewer
-        from src.ci_code_companion.test_generator import TestGenerator
+        # Run analysis using SDK
+        result = run_async(ci_sdk.analyze_file(file_path, code))
         
-        # Initialize AI components
-        gcp_project_id = os.getenv('GCP_PROJECT_ID')
-        if not gcp_project_id:
-            logger.error("GCP_PROJECT_ID environment variable not set.")
-            return jsonify({'error': 'AI service not configured (missing GCP_PROJECT_ID)'}), 500
-        ai_client = VertexAIClient(project_id=gcp_project_id)
-        
-        def extract_code_context(content, line_number, context_lines=3):
-            """Extract code context around a specific line."""
-            lines = content.split('\n')
-            start = max(0, line_number - context_lines - 1)
-            end = min(len(lines), line_number + context_lines)
-            
-            return {
-                'start_line': start + 1,
-                'end_line': end,
-                'code': '\n'.join(lines[start:end]),
-                'focus_line': line_number
+        # Format response for frontend
+        response = {
+            "success": True,
+            "analysis": {
+                "operation_id": result.operation_id,
+                "file_path": result.file_path,
+                "agent_type": result.agent_type,
+                "confidence_score": result.confidence_score,
+                "execution_time": result.execution_time,
+                "quality_score": result.calculate_quality_score(),
+                "has_blocking_issues": result.has_blocking_issues(),
+                "issues": [
+                    {
+                        "id": issue.id,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "line_number": issue.line_number,
+                        "column_number": issue.column_number,
+                        "suggestion": issue.suggestion,
+                        "fix_code": issue.fix_code,
+                        "confidence_score": issue.confidence_score,
+                        "is_auto_fixable": issue.is_auto_fixable()
+                    } for issue in result.issues
+                ],
+                "suggestions": [
+                    {
+                        "title": suggestion.title,
+                        "description": suggestion.description,
+                        "impact": suggestion.impact,
+                        "effort": suggestion.effort,
+                        "category": suggestion.category
+                    } for suggestion in result.suggestions
+                ],
+                "metadata": result.metadata
             }
+        }
         
-        def analyze_issue_context(content, issue_description):
-            """Analyze the context of an issue to find relevant code sections."""
-            lines = content.split('\n')
-            context = None
-            
-            # Look for code patterns mentioned in the issue
-            for i, line in enumerate(lines, 1):
-                # Extract potential code snippets or patterns from issue description
-                if any(pattern in line for pattern in extract_code_patterns(issue_description)):
-                    context = extract_code_context(content, i)
-                    break
-            
-            return context
+        return jsonify(response)
         
-        def extract_code_patterns(description):
-            """Extract potential code patterns from issue description."""
-            # Extract quoted code, function names, variable names, etc.
-            patterns = []
-            
-            # Look for quoted code
-            import re
-            quoted = re.findall(r'`([^`]+)`', description)
-            patterns.extend(quoted)
-            
-            # Look for common code patterns
-            code_patterns = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*\([^)]*\))', description)
-            patterns.extend(code_patterns)
-            
-            return patterns
-        
-        def analyze_code_structure(code, lang='python'):
-            """Analyze code structure to determine proper indentation and context."""
-            lines = code.split('\n')
-            structure = {
-                'indent_map': {},
-                'context_map': {},
-                'block_starts': set(),
-                'block_ends': set(),
-                'indent_size': 4 if lang in ['python'] else 2
-            }
-            
-            stack = []
-            current_class = None
-            current_function = None
-            
-            for i, line in enumerate(lines):
-                line_num = i + 1
-                trimmed = line.strip()
-                
-                # Skip empty lines but maintain context
-                if not trimmed:
-                    structure['indent_map'][line_num] = len(stack)
-                    continue
-                
-                # Detect block starts
-                if trimmed.endswith(':'):
-                    structure['block_starts'].add(line_num)
-                    stack.append(line_num)
-                
-                # Track class and function context
-                if trimmed.startswith('class '):
-                    current_class = trimmed.split('class ')[1].split('(')[0].split(':')[0].strip()
-                    structure['context_map'][line_num] = {'class': current_class, 'function': None}
-                elif trimmed.startswith('def '):
-                    current_function = trimmed.split('def ')[1].split('(')[0].strip()
-                    structure['context_map'][line_num] = {'class': current_class, 'function': current_function}
-                
-                # Detect block ends
-                if stack and (trimmed.startswith('return') or trimmed.startswith('break') or 
-                            trimmed.startswith('continue') or trimmed.startswith('raise')):
-                    structure['block_ends'].add(line_num)
-                    if stack:
-                        stack.pop()
-                
-                # Store indentation level
-                structure['indent_map'][line_num] = len(stack)
-            
-            return structure
-        
-        def apply_proper_indentation(code, structure):
-            """Apply proper indentation based on code structure analysis."""
-            lines = code.split('\n')
-            result = []
-            
-            for i, line in enumerate(lines, 1):
-                if not line.strip():
-                    result.append('')
-                    continue
-                
-                indent_level = structure['indent_map'].get(i, 0)
-                indent = ' ' * (indent_level * structure['indent_size'])
-                result.append(indent + line.strip())
-            
-            return '\n'.join(result)
-        
-        def complete_code_block(code, structure, language):
-            """Complete code blocks by adding necessary closing statements."""
-            lines = code.split('\n')
-            completions = []
-            
-            # Add missing block endings
-            for block_start in structure['block_starts']:
-                if block_start not in structure['block_ends']:
-                    indent_level = structure['indent_map'].get(block_start, 0)
-                    indent = ' ' * (indent_level * structure['indent_size'])
-                    
-                    # Add appropriate closing statement based on language
-                    if language == 'python':
-                        if 'class' in structure['context_map'].get(block_start, {}):
-                            completions.append(f"{indent}    pass")
-                        elif 'function' in structure['context_map'].get(block_start, {}):
-                            completions.append(f"{indent}    return None")
-                        else:
-                            completions.append(f"{indent}    pass")
-            
-            if completions:
-                lines.extend(completions)
-            
-            return '\n'.join(lines)
-        
-        result = {}
-        
-        if action == 'review':
-            reviewer = CodeReviewer(ai_client)
-            review_result = reviewer.review_code_content(content, file_path)
-            
-            # Enhance issues with context
-            if 'issues' in review_result:
-                enhanced_issues = []
-                for i, issue in enumerate(review_result['issues']):
-                    issue_context = analyze_issue_context(content, issue)
-                    enhanced_issues.append({
-                        'id': i + 1,
-                        'description': issue,
-                        'context': issue_context,
-                        'severity': determine_issue_severity(issue),
-                        'category': categorize_issue(issue)
-                    })
-                review_result['issues'] = enhanced_issues
-            
-            # Enhance suggested changes
-            if 'suggested_changes' in review_result:
-                for i, change in enumerate(review_result['suggested_changes']):
-                    if 'new_content' in change:
-                        # Analyze structure of the new content
-                        structure = analyze_code_structure(change['new_content'], language)
-                        
-                        # Complete any incomplete code blocks
-                        completed_code = complete_code_block(change['new_content'], structure, language)
-                        
-                        # Apply proper indentation
-                        indented_code = apply_proper_indentation(completed_code, structure)
-                        
-                        # Add context information
-                        raw_line_num_context = change.get('line_number', '1') # Default to 1 if not present
-                        line_for_context = -1
-                        try:
-                            if isinstance(raw_line_num_context, str) and '-' in raw_line_num_context:
-                                start_str, _ = raw_line_num_context.split("-", 1)
-                                line_for_context = int(start_str.strip())
-                            else:
-                                line_for_context = int(raw_line_num_context)
-                        except ValueError:
-                            logger.warning(f"Could not parse line_number '{raw_line_num_context}' for context, defaulting to 1.")
-                            line_for_context = 1
-
-                        change.update({
-                            'issue_index': determine_related_issue(change, review_result['issues']),
-                            'change_index': i,
-                            'context': extract_code_context(content, line_for_context),
-                            'new_content': indented_code,
-                            'change_type': determine_change_type(change),
-                            'impact': assess_change_impact(change)
-                        })
-            
-            result = {
-                'action': 'review',
-                'file_path': file_path,
-                'analysis': review_result,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        elif action == 'test-generation':
-            test_generator = TestGenerator(ai_client)
-            test_result = test_generator.generate_tests(content, file_path)
-            
-            if 'test_code' in test_result:
-                structure = analyze_code_structure(test_result['test_code'], language)
-                completed_code = complete_code_block(test_result['test_code'], structure, language)
-                test_result['test_code'] = apply_proper_indentation(completed_code, structure)
-            
-            result = {
-                'action': 'test-generation',
-                'file_path': file_path,
-                'tests': test_result,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        elif action == 'improve':
-            reviewer = CodeReviewer(ai_client)
-            improvement_result = reviewer.review_code_content(content, file_path, review_type="comprehensive")
-            
-            if 'suggested_changes' in improvement_result:
-                for change in improvement_result['suggested_changes']:
-                    if 'new_content' in change:
-                        structure = analyze_code_structure(change['new_content'], language)
-                        completed_code = complete_code_block(change['new_content'], structure, language)
-                        change['new_content'] = apply_proper_indentation(completed_code, structure)
-            
-            result = {
-                'action': 'improve',
-                'file_path': file_path,
-                'improvements': improvement_result,
-                'timestamp': datetime.now().isoformat()
-            }
-        else:
-            return jsonify({'error': 'Invalid action'}), 400
-        
-        return jsonify(result)
-        
+    except AnalysisError as e:
+        logger.error(f"Analysis error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Analysis failed: {str(e)}"
+        }), 400
     except Exception as e:
-        logger.error(f"AI analysis error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-def determine_issue_severity(issue):
-    """Determine the severity level of an issue."""
-    keywords = {
-        'critical': ['critical', 'severe', 'security', 'crash', 'memory leak'],
-        'high': ['error', 'bug', 'incorrect', 'wrong', 'fail'],
-        'medium': ['warning', 'potential', 'might', 'could', 'consider'],
-        'low': ['style', 'formatting', 'documentation', 'suggestion']
-    }
-    
-    issue_lower = issue.lower()
-    for severity, words in keywords.items():
-        if any(word in issue_lower for word in words):
-            return severity
-    return 'medium'
-
-def categorize_issue(issue):
-    """Categorize the type of issue."""
-    categories = {
-        'security': ['security', 'vulnerability', 'injection', 'xss', 'csrf'],
-        'performance': ['performance', 'slow', 'optimization', 'memory', 'cpu'],
-        'reliability': ['error', 'exception', 'crash', 'bug', 'incorrect'],
-        'maintainability': ['duplicate', 'complex', 'readability', 'naming'],
-        'style': ['style', 'formatting', 'whitespace', 'indentation']
-    }
-    
-    issue_lower = issue.lower()
-    for category, keywords in categories.items():
-        if any(keyword in issue_lower for keyword in keywords):
-            return category
-    return 'general'
-
-def determine_change_type(change):
-    """Determine the type of code change."""
-    old_content = change.get('old_content', '')
-    new_content = change.get('new_content', '')
-    
-    if not old_content and new_content:
-        return 'addition'
-    elif old_content and not new_content:
-        return 'deletion'
-    else:
-        return 'modification'
-
-def assess_change_impact(change):
-    """Assess the potential impact of a code change."""
-    impacts = []
-    
-    # Check for function signature changes
-    if 'def ' in change.get('old_content', '') and 'def ' in change.get('new_content', ''):
-        impacts.append('function_signature')
-    
-    # Check for control flow changes
-    if any(keyword in change.get('new_content', '') for keyword in ['if', 'for', 'while', 'try']):
-        impacts.append('control_flow')
-    
-    # Check for error handling changes
-    if any(keyword in change.get('new_content', '') for keyword in ['except', 'raise', 'try']):
-        impacts.append('error_handling')
-    
-    return impacts
-
-def determine_related_issue(change, issues):
-    """Determine which issue this change is related to."""
-    change_content = f"{change.get('old_content', '')} {change.get('new_content', '')}"
-    
-    for i, issue in enumerate(issues):
-        # Look for keywords from the issue description in the change
-        if any(keyword in change_content.lower() for keyword in issue['description'].lower().split()):
-            return i
-    
-    return None
+        logger.error(f"Unexpected error in AI analysis: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred during analysis"
+        }), 500
 
 @app.route('/project-selector')
 def project_selector():
+    """Project selector page."""
     return render_template('project_selector.html')
 
-# AI Assistant Multi-Technology System
 @app.route('/ai/review-file', methods=['POST'])
 def review_file_ai():
-    """AI-powered file review with technology-specific analysis"""
+    """AI-powered file review using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
+    
     try:
         data = request.get_json()
-        file_path = data.get('file_path')
-        file_content = data.get('file_content')
-        language = data.get('language')
-        agent = data.get('agent', 'general')
-        project_context = data.get('project_context', {})
+        code = data.get('code', '')
+        file_path = data.get('file_path', 'unknown.py')
         
-        # Route to appropriate agent
-        if agent == 'frontend-react':
-            issues = analyze_react_file(file_content, file_path, project_context)
-        elif agent == 'backend-python':
-            issues = analyze_python_file(file_content, file_path, project_context)
-        elif agent == 'backend-node':
-            issues = analyze_node_file(file_content, file_path, project_context)
-        elif agent == 'database':
-            issues = analyze_database_file(file_content, file_path, project_context)
-        elif agent == 'devops':
-            issues = analyze_devops_file(file_content, file_path, project_context)
-        elif agent == 'mobile':
-            issues = analyze_mobile_file(file_content, file_path, project_context)
-        else:
-            issues = analyze_general_file(file_content, file_path, language, project_context)
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "No code provided for review"
+            }), 400
         
-        return jsonify({
-            'success': True,
-            'agent': agent,
-            'issues': issues,
-            'analysis_time': time.time()
-        })
+        # Analyze file using SDK
+        result = run_async(ci_sdk.analyze_file(file_path, code))
+        
+        # Format for review response
+        review_response = {
+            "success": True,
+            "review": {
+                "overall_score": result.calculate_quality_score(),
+                "agent_used": result.agent_type,
+                "confidence": result.confidence_score,
+                "critical_issues": len(result.get_critical_issues()),
+                "total_issues": len(result.issues),
+                "issues": [
+                    {
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "line": issue.line_number,
+                        "suggestion": issue.suggestion,
+                        "auto_fixable": issue.is_auto_fixable()
+                    } for issue in result.issues
+                ],
+                "suggestions": [
+                    {
+                        "title": suggestion.title,
+                        "description": suggestion.description,
+                        "impact": suggestion.impact
+                    } for suggestion in result.suggestions
+                ]
+            }
+        }
+        
+        return jsonify(review_response)
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error in file review: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/ai/generate-tests', methods=['POST'])
 def generate_tests_ai():
-    """AI-powered test generation with technology-specific strategies"""
+    """AI-powered test generation using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
+    
     try:
         data = request.get_json()
-        file_path = data.get('file_path')
-        file_content = data.get('file_content')
-        language = data.get('language')
-        agent = data.get('agent', 'general')
-        test_config = data.get('test_config', {})
-        project_context = data.get('project_context', {})
+        code = data.get('code', '')
+        file_path = data.get('file_path', 'unknown.py')
+        test_type = data.get('test_type', 'unit')
         
-        # Route to appropriate test generator
-        if agent == 'frontend-react':
-            test_result = generate_react_tests(file_content, file_path, test_config, project_context)
-        elif agent == 'backend-python':
-            test_result = generate_python_tests(file_content, file_path, test_config, project_context)
-        elif agent == 'backend-node':
-            test_result = generate_node_tests(file_content, file_path, test_config, project_context)
-        elif agent == 'database':
-            test_result = generate_database_tests(file_content, file_path, test_config, project_context)
-        elif agent == 'devops':
-            test_result = generate_devops_tests(file_content, file_path, test_config, project_context)
-        elif agent == 'mobile':
-            test_result = generate_mobile_tests(file_content, file_path, test_config, project_context)
-        else:
-            test_result = generate_general_tests(file_content, file_path, language, test_config, project_context)
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "No code provided for test generation"
+            }), 400
+        
+        # Generate tests using SDK
+        result = run_async(ci_sdk.generate_tests(file_path, code, test_type=test_type))
         
         return jsonify({
-            'success': True,
-            'agent': agent,
-            'test_code': test_result['code'],
-            'explanation': test_result['explanation'],
-            'coverage_areas': test_result['coverage_areas'],
-            'test_framework': test_result.get('framework', 'unknown')
+            "success": True,
+            "tests": result
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error in test generation: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/ai/optimize-code', methods=['POST'])
 def optimize_code_ai():
-    """AI-powered code optimization with technology-specific improvements"""
+    """AI-powered code optimization using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
+    
     try:
         data = request.get_json()
-        file_path = data.get('file_path')
-        file_content = data.get('file_content')
-        language = data.get('language')
-        agent = data.get('agent', 'general')
-        project_context = data.get('project_context', {})
+        code = data.get('code', '')
+        file_path = data.get('file_path', 'unknown.py')
+        optimization_type = data.get('optimization_type', 'performance')
         
-        # Route to appropriate optimizer
-        if agent == 'frontend-react':
-            optimizations = optimize_react_code(file_content, file_path, project_context)
-        elif agent == 'backend-python':
-            optimizations = optimize_python_code(file_content, file_path, project_context)
-        elif agent == 'backend-node':
-            optimizations = optimize_node_code(file_content, file_path, project_context)
-        elif agent == 'database':
-            optimizations = optimize_database_code(file_content, file_path, project_context)
-        elif agent == 'devops':
-            optimizations = optimize_devops_code(file_content, file_path, project_context)
-        elif agent == 'mobile':
-            optimizations = optimize_mobile_code(file_content, file_path, project_context)
-        else:
-            optimizations = optimize_general_code(file_content, file_path, language, project_context)
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "No code provided for optimization"
+            }), 400
+        
+        # Optimize code using SDK
+        result = run_async(ci_sdk.optimize_code(file_path, code, optimization_type=optimization_type))
         
         return jsonify({
-            'success': True,
-            'agent': agent,
-            'optimizations': optimizations
+            "success": True,
+            "optimization": result
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error in code optimization: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/ai/chat', methods=['POST'])
 def chat_ai():
-    """AI-powered contextual chat about code with technology-specific knowledge"""
+    """AI chat functionality using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
+    
     try:
         data = request.get_json()
-        message = data.get('message')
+        message = data.get('message', '')
         file_path = data.get('file_path')
-        file_content = data.get('file_content')
-        language = data.get('language')
-        agent = data.get('agent', 'general')
-        chat_history = data.get('chat_history', [])
-        project_context = data.get('project_context', {})
+        content = data.get('content')
+        conversation_history = data.get('conversation_history', [])
         
-        # Route to appropriate chat agent
-        if agent == 'frontend-react':
-            response = chat_react_expert(message, file_content, file_path, chat_history, project_context)
-        elif agent == 'backend-python':
-            response = chat_python_expert(message, file_content, file_path, chat_history, project_context)
-        elif agent == 'backend-node':
-            response = chat_node_expert(message, file_content, file_path, chat_history, project_context)
-        elif agent == 'database':
-            response = chat_database_expert(message, file_content, file_path, chat_history, project_context)
-        elif agent == 'devops':
-            response = chat_devops_expert(message, file_content, file_path, chat_history, project_context)
-        elif agent == 'mobile':
-            response = chat_mobile_expert(message, file_content, file_path, chat_history, project_context)
-        else:
-            response = chat_general_expert(message, file_content, file_path, language, chat_history, project_context)
+        if not message:
+            return jsonify({
+                "success": False,
+                "error": "No message provided"
+            }), 400
+        
+        # Chat using SDK
+        response = run_async(ci_sdk.chat(
+            message=message,
+            file_path=file_path,
+            content=content,
+            conversation_history=conversation_history
+        ))
         
         return jsonify({
-            'success': True,
-            'agent': agent,
-            'response': response,
-            'timestamp': time.time()
+            "success": True,
+            "response": response
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error in AI chat: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/ai/analyze-directory', methods=['POST'])
 def analyze_directory_ai():
-    """AI-powered directory structure analysis and optimization suggestions"""
+    """AI-powered directory analysis using CI Code Companion SDK"""
+    if not ci_sdk:
+        return jsonify({
+            "success": False,
+            "error": "CI Code Companion SDK not available"
+        }), 500
+    
     try:
         data = request.get_json()
-        project_id = data.get('project_id')
-        branch = data.get('branch', 'main')
+        directory_path = data.get('directory_path', '')
         
-        # Get complete project structure
-        file_tree = get_complete_project_structure(project_id, branch)
+        if not directory_path:
+            return jsonify({
+                "success": False,
+                "error": "No directory path provided"
+            }), 400
         
-        # Analyze directory structure
-        analysis = analyze_project_structure(file_tree, project_id)
-        
+        # This would need to be implemented in the SDK
+        # For now, return a placeholder response
         return jsonify({
-            'success': True,
-            'analysis': analysis,
-            'suggestions': analysis.get('suggestions', []),
-            'score': analysis.get('organization_score', 0),
-            'issues': analysis.get('issues', [])
+            "success": True,
+            "analysis": {
+                "directory": directory_path,
+                "message": "Directory analysis functionality to be implemented in SDK"
+            }
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error in directory analysis: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/sdk-status')
+def sdk_status():
+    """Check CI Code Companion SDK status"""
+    if not ci_sdk:
+        return jsonify({
+            "available": False,
+            "error": "SDK not initialized"
+        })
+    
+    try:
+        # Get SDK health status
+        health = run_async(ci_sdk.health_check())
+        return jsonify({
+            "available": True,
+            "health": health,
+            "config": {
+                "ai_provider": ci_sdk.config.ai_provider,
+                "project_id": ci_sdk.config.project_id,
+                "region": ci_sdk.config.region
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "available": True,
+            "error": str(e)
+        })
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001) 
+    port = int(os.environ.get('PORT', 5001))
+    app.run(host='0.0.0.0', port=port, debug=True) 
