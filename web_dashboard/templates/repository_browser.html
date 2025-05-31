@@ -541,152 +541,384 @@
 
         <!-- Content Area -->
         <div class="content-area" :class="{'no-bottom-panel': !showBottomPanel}">
-            <!-- Monaco Editor Area -->
-            <div class="monaco-editor-area relative bg-gray-800">
-                <!-- File Header -->
-                <div x-show="selectedFile" class="bg-gray-700 px-6 py-3 border-b border-gray-600 flex items-center justify-between flex-shrink-0">
-                    <div class="flex items-center space-x-3">
-                        <i :class="getFileIcon(selectedFile)" class="text-lg"></i>
-                        <span class="font-medium" x-text="selectedFile?.name">Select a file</span>
-                        <span x-show="selectedFile" class="text-sm text-gray-400 truncate" x-text="selectedFile?.path"></span>
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- File Tree Panel -->
+                <div class="file-tree-panel">
+                    <!-- Existing file tree content -->
+                    <div class="file-tree-header">
+                        <h3 class="section-title">
+                            <i class="fas fa-folder-tree mr-2"></i>
+                            Files
+                        </h3>
+                        
+                        <!-- File search -->
+                        <div class="search-container">
+                            <input type="text" 
+                                   x-model="fileSearch"
+                                   @input="performGlobalSearch()"
+                                   placeholder="Search files..."
+                                   class="search-input">
+                            <i class="fas fa-search search-icon"></i>
+                        </div>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <span x-show="fileSize" class="text-xs text-gray-400" x-text="fileSize"></span>
-                        <span x-show="selectedFile" class="text-xs text-gray-400" x-text="getFileLanguage(selectedFile)"></span>
+
+                    <!-- File Tree -->
+                    <div class="file-tree-content">
+                        <template x-for="item in filteredFiles" :key="item.path">
+                            <div class="file-item"
+                                 :class="[
+                                    `depth-${item.depth}`, 
+                                    item.type, 
+                                    getFileStatusClass(item),
+                                    { 'selected': selectedFile?.path === item.path }
+                                 ]"
+                                 @click="handleFileItemClick(item, $event)">
+                                
+                                <div class="file-item-content">
+                                    <div class="file-icon-container">
+                                        <i :class="getFileIcon(item)"></i>
+                                    </div>
+                                    
+                                    <span class="file-name" x-text="item.name"></span>
+                                    
+                                    <div class="file-status">
+                                        <span class="status-indicator" x-text="getFileStatus(item)"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </div>
 
-                <!-- Monaco Editor Container -->
-                <div class="monaco-editor-container-wrapper">
-                    <div id="monaco-editor-container" class="monaco-container"></div>
-                    
-                    <!-- Progress Sidebar -->
-                    <div x-show="loading && analysisType" 
-                         x-transition:enter="transition ease-out duration-300"
-                         x-transition:enter-start="transform translate-x-full"
-                         x-transition:enter-end="transform translate-x-0"
-                         x-transition:leave="transition ease-in duration-300"
-                         x-transition:leave-start="transform translate-x-0"
-                         x-transition:leave-end="transform translate-x-full"
-                         class="progress-sidebar">
-                        
-                        <!-- Debug Info -->
-                        <div class="hidden" x-data x-text="console.log('Progress sidebar visible:', loading, analysisType)"></div>
-                        
-                        <!-- Progress Header -->
-                        <div class="p-4 border-b border-gray-600">
-                            <div class="flex items-center justify-between mb-3">
-                                <div class="flex items-center space-x-3">
-                                    <div class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-                                        <i class="fas fa-robot text-white"></i>
-                                    </div>
-                                    <div>
-                                        <h3 class="font-semibold text-white">AI Analysis</h3>
-                                        <p class="text-sm text-gray-400" x-text="getAnalysisMessage()"></p>
-                                    </div>
-                                </div>
-                                <!-- Close Button -->
-                                <button @click="loading = false; analysisType = null;" 
-                                        class="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-600">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            
-                            <!-- Progress Bar -->
-                            <div class="mb-3">
-                                <div class="flex justify-between text-sm text-gray-400 mb-1">
-                                    <span>Progress</span>
-                                    <span x-text="Math.round(analysisProgress) + '%'"></span>
-                                </div>
-                                <div class="w-full bg-gray-700 rounded-full h-2">
-                                    <div class="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full transition-all duration-300" 
-                                         :style="'width: ' + analysisProgress + '%'"></div>
-                                </div>
-                            </div>
-                            
-                            <!-- Current Step -->
-                            <div class="bg-gray-700 rounded-lg p-3">
-                                <div class="flex items-center space-x-2">
-                                    <div class="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                                        <i class="fas fa-cog fa-spin text-white text-sm"></i>
-                                    </div>
-                                    <div class="text-left">
-                                        <div class="font-medium text-white" x-text="currentStep.title"></div>
-                                        <div class="text-sm text-gray-400" x-text="currentStep.description"></div>
-                                    </div>
-                                </div>
-                                <div class="mt-3 text-xs text-gray-500" x-text="'Elapsed: ' + formatElapsedTime(analysisStartTime)"></div>
+                <!-- Editor Panel -->
+                <div class="editor-panel">
+                    <!-- Editor Header -->
+                    <div class="editor-header">
+                        <div class="editor-tabs">
+                            <div x-show="selectedFile" class="editor-tab active">
+                                <i :class="getFileIcon(selectedFile)" class="mr-2"></i>
+                                <span x-text="selectedFile?.name"></span>
+                                <span x-show="hasChanges" class="ml-2 text-yellow-400">●</span>
                             </div>
                         </div>
                         
-                        <!-- Analysis Steps -->
-                        <div class="p-4 space-y-3 flex-1">
-                            <h4 class="font-medium text-white text-sm mb-3">Analysis Steps</h4>
-                            <template x-for="(step, index) in analysisSteps" :key="index">
-                                <div class="flex items-center space-x-3 text-sm p-2 rounded-lg" 
-                                     :class="step.status === 'completed' ? 'bg-green-900 text-green-200' : 
-                                             step.status === 'active' ? 'bg-blue-900 text-blue-200' : 'bg-gray-700 text-gray-400'">
-                                    <div class="w-5 h-5 flex items-center justify-center">
-                                        <i x-show="step.status === 'completed'" class="fas fa-check-circle text-green-400"></i>
-                                        <i x-show="step.status === 'active'" class="fas fa-circle-notch fa-spin text-blue-400"></i>
-                                        <i x-show="step.status === 'pending'" class="far fa-circle text-gray-500"></i>
-                                    </div>
-                                    <span class="flex-1" x-text="step.name"></span>
-                                    <div x-show="step.status === 'completed' && step.result" class="text-xs bg-gray-600 px-2 py-1 rounded" x-text="step.result"></div>
-                                </div>
-                            </template>
+                        <div class="editor-actions">
+                            <button x-show="selectedFile && hasChanges" 
+                                    @click="commitChanges()" 
+                                    class="action-button btn-primary">
+                                <i class="fas fa-save mr-1"></i>
+                                Commit
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Monaco Editor Container -->
+                    <div class="editor-container">
+                        <div x-show="loading" class="loading-overlay">
+                            <div class="loading-content">
+                                <i class="fas fa-spinner fa-spin text-3xl mb-2"></i>
+                                <p x-text="loadingMessage"></p>
+                            </div>
                         </div>
                         
-                        <!-- Real-time Issues Found -->
-                        <div x-show="realTimeIssues.length > 0" class="p-4 border-t border-gray-600">
-                            <h4 class="font-medium text-white text-sm mb-3 flex items-center">
-                                <i class="fas fa-exclamation-triangle text-yellow-400 mr-2"></i>
-                                Issues Found (<span x-text="realTimeIssues.length"></span>)
-                            </h4>
-                            <div class="space-y-2 max-h-40 overflow-y-auto">
-                                <template x-for="issue in realTimeIssues" :key="issue.id">
-                                    <div class="bg-gray-700 p-2 rounded text-xs">
-                                        <div class="flex items-center space-x-2 mb-1">
-                                            <div :class="'w-2 h-2 rounded-full ' + getSeverityColor(issue.severity)"></div>
-                                            <span class="font-medium text-white" x-text="issue.title"></span>
+                        <div x-show="!selectedFile && !loading" class="no-file-selected">
+                            <div class="welcome-message">
+                                <i class="fas fa-code text-4xl text-blue-400 mb-4"></i>
+                                <h3 class="text-xl font-medium mb-2">Welcome to Repository Browser</h3>
+                                <p class="text-gray-400">Select a file from the tree to start editing</p>
+                            </div>
+                        </div>
+
+                        <div id="monaco-editor-container"></div>
+                    </div>
+                </div>
+
+                <!-- NEW: Right AI Assistant Sidebar -->
+                <div class="ai-assistant-sidebar" :class="{ 'collapsed': collapsedSections.aiAssistant }">
+                    <!-- AI Assistant Header -->
+                    <div class="ai-assistant-header">
+                        <div class="flex items-center justify-between p-4 border-b border-gray-600">
+                            <div class="flex items-center space-x-2">
+                                <i class="fas fa-robot text-blue-400"></i>
+                                <span class="font-medium text-white">AI Assistant</span>
+                            </div>
+                            <button @click="toggleSection('aiAssistant')" 
+                                    class="text-gray-400 hover:text-white">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- Context Info -->
+                        <div x-show="selectedFile" class="context-info p-3 bg-gray-700 border-b border-gray-600">
+                            <div class="flex items-center space-x-2 text-sm">
+                                <i :class="getFileIcon(selectedFile)" class="text-xs"></i>
+                                <span class="text-gray-300" x-text="selectedFile?.name"></span>
+                                <span class="text-gray-500">•</span>
+                                <span class="text-blue-400" x-text="getFileLanguage(selectedFile)"></span>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-1">
+                                <span x-text="fileSize"></span>
+                                <span x-show="hasChanges" class="ml-2 text-yellow-400">• Modified</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Assistant Tabs -->
+                    <div class="ai-assistant-tabs">
+                        <div class="tab-buttons">
+                            <button @click="assistantTab = 'review'" 
+                                    :class="{'active': assistantTab === 'review'}"
+                                    class="tab-button">
+                                <i class="fas fa-search-code"></i>
+                                <span>Review</span>
+                            </button>
+                            <button @click="assistantTab = 'test'" 
+                                    :class="{'active': assistantTab === 'test'}"
+                                    class="tab-button">
+                                <i class="fas fa-vial"></i>
+                                <span>Test</span>
+                            </button>
+                            <button @click="assistantTab = 'optimize'" 
+                                    :class="{'active': assistantTab === 'optimize'}"
+                                    class="tab-button">
+                                <i class="fas fa-rocket"></i>
+                                <span>Optimize</span>
+                            </button>
+                            <button @click="assistantTab = 'chat'" 
+                                    :class="{'active': assistantTab === 'chat'}"
+                                    class="tab-button">
+                                <i class="fas fa-comments"></i>
+                                <span>Chat</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- AI Assistant Content -->
+                    <div class="ai-assistant-content">
+                        <!-- Review Tab -->
+                        <div x-show="assistantTab === 'review'" class="tab-content">
+                            <div class="p-4">
+                                <div class="flex items-center justify-between mb-4">
+                                    <h4 class="font-medium text-white">Code Review</h4>
+                                    <button @click="startFileReview()" 
+                                            :disabled="!selectedFile || reviewLoading"
+                                            class="action-button btn-primary text-sm">
+                                        <i :class="reviewLoading ? 'fas fa-spinner fa-spin' : 'fas fa-search-code'" class="mr-1"></i>
+                                        <span x-text="reviewLoading ? 'Reviewing...' : 'Review File'"></span>
+                                    </button>
+                                </div>
+
+                                <!-- Technology Detection -->
+                                <div x-show="selectedFile" class="tech-detection mb-4 p-3 bg-gray-700 rounded">
+                                    <div class="flex items-center space-x-2 mb-2">
+                                        <i class="fas fa-microchip text-purple-400"></i>
+                                        <span class="text-sm font-medium text-white">Detected Technology</span>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <span class="tech-badge" x-text="detectedTech?.name || 'Unknown'"></span>
+                                        <span class="text-xs text-gray-400" x-text="detectedTech?.confidence ? `${detectedTech.confidence}% confidence` : ''"></span>
+                                    </div>
+                                    <div x-show="detectedTech?.agent" class="text-xs text-blue-400 mt-1">
+                                        Agent: <span x-text="detectedTech.agent"></span>
+                                    </div>
+                                </div>
+
+                                <!-- Review Results -->
+                                <div x-show="reviewResults.length > 0" class="review-results space-y-3">
+                                    <template x-for="result in reviewResults" :key="result.id">
+                                        <div :class="'review-item severity-' + result.severity" class="p-3 rounded border-l-4">
+                                            <div class="flex items-start justify-between mb-2">
+                                                <div class="flex items-center space-x-2">
+                                                    <i :class="getSeverityIcon(result.severity)"></i>
+                                                    <span class="font-medium text-sm" x-text="result.title"></span>
+                                                </div>
+                                                <span :class="getSeverityBadge(result.severity)" 
+                                                      class="px-2 py-1 text-xs rounded" 
+                                                      x-text="result.severity.toUpperCase()"></span>
+                                            </div>
+                                            <p class="text-sm text-gray-300 mb-2" x-text="result.description"></p>
+                                            <div x-show="result.lineNumber" class="text-xs text-gray-400 mb-2">
+                                                Line <span x-text="result.lineNumber"></span>
+                                            </div>
+                                            <div x-show="result.suggestion" class="bg-gray-800 p-2 rounded text-xs">
+                                                <div class="text-blue-400 mb-1">💡 Suggestion:</div>
+                                                <div class="text-gray-300" x-text="result.suggestion"></div>
+                                            </div>
                                         </div>
-                                        <div class="text-gray-400" x-text="issue.preview"></div>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                        
-                        <!-- Quick Stats -->
-                        <div class="p-4 border-t border-gray-600">
-                            <div class="grid grid-cols-2 gap-3 text-center">
-                                <div class="bg-gray-700 rounded-lg p-2">
-                                    <div class="text-lg font-bold text-red-400" x-text="analysisStats.issuesFound"></div>
-                                    <div class="text-xs text-gray-400">Issues</div>
+                                    </template>
                                 </div>
-                                <div class="bg-gray-700 rounded-lg p-2">
-                                    <div class="text-lg font-bold text-green-400" x-text="analysisStats.suggestions"></div>
-                                    <div class="text-xs text-gray-400">Solutions</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Empty State -->
-                <div x-show="!selectedFile" class="absolute inset-0 flex items-center justify-center text-gray-500">
-                    <div class="text-center">
-                        <i class="fas fa-file-code text-6xl mb-4 text-gray-600"></i>
-                        <h3 class="text-xl font-medium mb-2">Select a file to view</h3>
-                        <p class="text-gray-400">Choose a file from the repository tree to start editing</p>
-                    </div>
-                </div>
 
-                <!-- Loading Overlay -->
-                <div x-show="loading && !analysisType" class="loading-overlay">
-                    <div class="loading-content">
-                        <div class="loading-spinner"></div>
-                        <div class="loading-text" x-text="loadingMessage">Loading...</div>
-                        <div class="loading-subtext">Please wait while we process your request</div>
+                                <div x-show="!reviewResults.length && !reviewLoading && selectedFile" 
+                                     class="empty-state text-center py-8 text-gray-500">
+                                    <i class="fas fa-search-code text-3xl mb-2"></i>
+                                    <p>Click "Review File" to analyze this file</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Test Tab -->
+                        <div x-show="assistantTab === 'test'" class="tab-content">
+                            <div class="p-4">
+                                <div class="flex items-center justify-between mb-4">
+                                    <h4 class="font-medium text-white">Test Generation</h4>
+                                    <button @click="startFileTest()" 
+                                            :disabled="!selectedFile || testLoading"
+                                            class="action-button btn-primary text-sm">
+                                        <i :class="testLoading ? 'fas fa-spinner fa-spin' : 'fas fa-vial'" class="mr-1"></i>
+                                        <span x-text="testLoading ? 'Testing...' : 'Generate Tests'"></span>
+                                    </button>
+                                </div>
+
+                                <!-- Test Configuration -->
+                                <div x-show="selectedFile" class="test-config mb-4">
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-300 mb-2">Test Type</label>
+                                            <select x-model="testConfig.type" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
+                                                <option value="unit">Unit Tests</option>
+                                                <option value="integration">Integration Tests</option>
+                                                <option value="e2e">End-to-End Tests</option>
+                                                <option value="performance">Performance Tests</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-300 mb-2">Coverage Focus</label>
+                                            <div class="space-y-2">
+                                                <label class="flex items-center">
+                                                    <input type="checkbox" x-model="testConfig.coverageFocus.functions" class="mr-2">
+                                                    <span class="text-sm text-gray-300">Functions</span>
+                                                </label>
+                                                <label class="flex items-center">
+                                                    <input type="checkbox" x-model="testConfig.coverageFocus.edge_cases" class="mr-2">
+                                                    <span class="text-sm text-gray-300">Edge Cases</span>
+                                                </label>
+                                                <label class="flex items-center">
+                                                    <input type="checkbox" x-model="testConfig.coverageFocus.error_handling" class="mr-2">
+                                                    <span class="text-sm text-gray-300">Error Handling</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Test Results -->
+                                <div x-show="testResults" class="test-results">
+                                    <div class="bg-gray-800 rounded p-3 mb-3">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <span class="text-sm font-medium text-green-400">Generated Tests</span>
+                                            <button @click="copyTestCode()" class="text-xs text-blue-400 hover:text-blue-300">
+                                                <i class="fas fa-copy mr-1"></i>Copy
+                                            </button>
+                                        </div>
+                                        <pre class="text-xs text-gray-300 bg-gray-900 p-2 rounded overflow-x-auto" x-text="testResults?.code"></pre>
+                                    </div>
+                                    
+                                    <div x-show="testResults?.explanation" class="bg-gray-800 rounded p-3">
+                                        <div class="text-sm font-medium text-blue-400 mb-2">Test Explanation</div>
+                                        <div class="text-xs text-gray-300" x-text="testResults.explanation"></div>
+                                    </div>
+                                </div>
+
+                                <div x-show="!testResults && !testLoading && selectedFile" 
+                                     class="empty-state text-center py-8 text-gray-500">
+                                    <i class="fas fa-vial text-3xl mb-2"></i>
+                                    <p>Configure and generate tests for this file</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Optimize Tab -->
+                        <div x-show="assistantTab === 'optimize'" class="tab-content">
+                            <div class="p-4">
+                                <div class="flex items-center justify-between mb-4">
+                                    <h4 class="font-medium text-white">Code Optimization</h4>
+                                    <button @click="startFileOptimization()" 
+                                            :disabled="!selectedFile || optimizeLoading"
+                                            class="action-button btn-primary text-sm">
+                                        <i :class="optimizeLoading ? 'fas fa-spinner fa-spin' : 'fas fa-rocket'" class="mr-1"></i>
+                                        <span x-text="optimizeLoading ? 'Optimizing...' : 'Optimize'"></span>
+                                    </button>
+                                </div>
+
+                                <!-- Optimization Results -->
+                                <div x-show="optimizationResults.length > 0" class="optimization-results space-y-3">
+                                    <template x-for="result in optimizationResults" :key="result.id">
+                                        <div class="optimization-item p-3 bg-gray-800 rounded border border-gray-600">
+                                            <div class="flex items-center justify-between mb-2">
+                                                <div class="flex items-center space-x-2">
+                                                    <i class="fas fa-rocket text-green-400"></i>
+                                                    <span class="font-medium text-sm text-white" x-text="result.title"></span>
+                                                </div>
+                                                <div class="flex items-center space-x-2">
+                                                    <span class="text-xs text-green-400" x-text="result.impact"></span>
+                                                    <button @click="applyOptimization(result)" 
+                                                            class="action-button btn-sm btn-primary">
+                                                        Apply
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <p class="text-sm text-gray-300 mb-2" x-text="result.description"></p>
+                                            <div x-show="result.before && result.after" class="diff-preview">
+                                                <div class="text-xs text-gray-400 mb-1">Preview:</div>
+                                                <div class="bg-gray-900 rounded p-2 text-xs font-mono">
+                                                    <div class="text-red-400 mb-1">- <span x-text="result.before"></span></div>
+                                                    <div class="text-green-400">+ <span x-text="result.after"></span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <div x-show="!optimizationResults.length && !optimizeLoading && selectedFile" 
+                                     class="empty-state text-center py-8 text-gray-500">
+                                    <i class="fas fa-rocket text-3xl mb-2"></i>
+                                    <p>Analyze this file for optimization opportunities</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Chat Tab -->
+                        <div x-show="assistantTab === 'chat'" class="tab-content">
+                            <div class="flex flex-col h-full">
+                                <!-- Chat Messages -->
+                                <div class="chat-messages flex-1 p-4 overflow-y-auto space-y-3">
+                                    <template x-for="message in chatMessages" :key="message.id">
+                                        <div :class="message.role === 'user' ? 'chat-message user' : 'chat-message assistant'">
+                                            <div class="message-content">
+                                                <div class="message-header">
+                                                    <i :class="message.role === 'user' ? 'fas fa-user text-blue-400' : 'fas fa-robot text-purple-400'"></i>
+                                                    <span class="text-xs text-gray-400" x-text="message.timestamp"></span>
+                                                </div>
+                                                <div class="message-text" x-text="message.content"></div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    
+                                    <div x-show="chatMessages.length === 0" class="empty-state text-center py-8 text-gray-500">
+                                        <i class="fas fa-comments text-3xl mb-2"></i>
+                                        <p>Start a conversation about your code</p>
+                                    </div>
+                                </div>
+
+                                <!-- Chat Input -->
+                                <div class="chat-input-container p-4 border-t border-gray-600">
+                                    <div class="flex space-x-2">
+                                        <input type="text" 
+                                               x-model="chatInput"
+                                               @keydown.enter="sendChatMessage()"
+                                               placeholder="Ask about this file..."
+                                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm"
+                                               :disabled="chatLoading">
+                                        <button @click="sendChatMessage()" 
+                                                :disabled="!chatInput.trim() || chatLoading"
+                                                class="action-button btn-primary">
+                                            <i :class="chatLoading ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

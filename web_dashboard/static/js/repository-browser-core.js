@@ -99,6 +99,11 @@ function repositoryBrowserCore() {
                 console.timeEnd('selectFile-total');
                 console.log('🟩 [SELECTFILE] File selection completed successfully');
                 
+                // Update technology detection for AI assistant
+                if (typeof this.updateTechnologyDetection === 'function') {
+                    this.updateTechnologyDetection();
+                }
+                
             } catch (error) {
                 console.error('🟥 [SELECTFILE] Error selecting file:', error);
                 console.timeEnd('selectFile-total');

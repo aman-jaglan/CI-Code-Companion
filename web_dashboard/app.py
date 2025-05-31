@@ -12,6 +12,7 @@ from datetime import datetime
 from routes.gitlab_api import gitlab_bp, init_gitlab
 from config.gitlab_config import GitLabConfig
 from dotenv import load_dotenv
+import time
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -66,6 +67,62 @@ else:
 
 # Register GitLab blueprint with the correct URL prefix
 app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
+
+# Import AI agents
+try:
+    from ai_agents.multi_tech_agents import (
+        analyze_react_file, analyze_python_file, analyze_node_file, analyze_database_file,
+        analyze_devops_file, analyze_mobile_file, analyze_general_file,
+        generate_react_tests, generate_python_tests, generate_node_tests, generate_database_tests,
+        generate_devops_tests, generate_mobile_tests, generate_general_tests,
+        optimize_react_code, optimize_python_code, optimize_node_code, optimize_database_code,
+        optimize_devops_code, optimize_mobile_code, optimize_general_code,
+        chat_react_expert, chat_python_expert, chat_node_expert, chat_database_expert,
+        chat_devops_expert, chat_mobile_expert, chat_general_expert,
+        get_complete_project_structure, analyze_project_structure
+    )
+except ImportError as e:
+    print(f"Warning: AI agents not available: {e}")
+    # Create fallback functions
+    def fallback_function(*args, **kwargs):
+        return []
+    
+    # Set all functions to fallback
+    analyze_react_file = analyze_python_file = analyze_node_file = fallback_function
+    analyze_database_file = analyze_devops_file = analyze_mobile_file = fallback_function
+    analyze_general_file = fallback_function
+    
+    def fallback_test_function(*args, **kwargs):
+        return {
+            'code': '// AI agents not available',
+            'explanation': 'AI functionality is currently unavailable',
+            'coverage_areas': [],
+            'framework': 'none'
+        }
+    
+    generate_react_tests = generate_python_tests = generate_node_tests = fallback_test_function
+    generate_database_tests = generate_devops_tests = generate_mobile_tests = fallback_test_function
+    generate_general_tests = fallback_test_function
+    
+    optimize_react_code = optimize_python_code = optimize_node_code = fallback_function
+    optimize_database_code = optimize_devops_code = optimize_mobile_code = fallback_function
+    optimize_general_code = fallback_function
+    
+    def fallback_chat_function(*args, **kwargs):
+        return "AI chat functionality is currently unavailable. Please check the AI agents configuration."
+    
+    chat_react_expert = chat_python_expert = chat_node_expert = fallback_chat_function
+    chat_database_expert = chat_devops_expert = chat_mobile_expert = fallback_chat_function
+    chat_general_expert = fallback_chat_function
+    
+    def fallback_structure_function(*args, **kwargs):
+        return {'files': [], 'directories': [], 'total_files': 0}
+    
+    def fallback_analysis_function(*args, **kwargs):
+        return {'organization_score': 0, 'suggestions': [], 'issues': []}
+    
+    get_complete_project_structure = fallback_structure_function
+    analyze_project_structure = fallback_analysis_function
 
 @app.route('/app-test-route')
 def app_test_route():
@@ -578,6 +635,188 @@ def determine_related_issue(change, issues):
             return i
     
     return None
+
+@app.route('/project-selector')
+def project_selector():
+    return render_template('project_selector.html')
+
+# AI Assistant Multi-Technology System
+@app.route('/ai/review-file', methods=['POST'])
+def review_file_ai():
+    """AI-powered file review with technology-specific analysis"""
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+        file_content = data.get('file_content')
+        language = data.get('language')
+        agent = data.get('agent', 'general')
+        project_context = data.get('project_context', {})
+        
+        # Route to appropriate agent
+        if agent == 'frontend-react':
+            issues = analyze_react_file(file_content, file_path, project_context)
+        elif agent == 'backend-python':
+            issues = analyze_python_file(file_content, file_path, project_context)
+        elif agent == 'backend-node':
+            issues = analyze_node_file(file_content, file_path, project_context)
+        elif agent == 'database':
+            issues = analyze_database_file(file_content, file_path, project_context)
+        elif agent == 'devops':
+            issues = analyze_devops_file(file_content, file_path, project_context)
+        elif agent == 'mobile':
+            issues = analyze_mobile_file(file_content, file_path, project_context)
+        else:
+            issues = analyze_general_file(file_content, file_path, language, project_context)
+        
+        return jsonify({
+            'success': True,
+            'agent': agent,
+            'issues': issues,
+            'analysis_time': time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/ai/generate-tests', methods=['POST'])
+def generate_tests_ai():
+    """AI-powered test generation with technology-specific strategies"""
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+        file_content = data.get('file_content')
+        language = data.get('language')
+        agent = data.get('agent', 'general')
+        test_config = data.get('test_config', {})
+        project_context = data.get('project_context', {})
+        
+        # Route to appropriate test generator
+        if agent == 'frontend-react':
+            test_result = generate_react_tests(file_content, file_path, test_config, project_context)
+        elif agent == 'backend-python':
+            test_result = generate_python_tests(file_content, file_path, test_config, project_context)
+        elif agent == 'backend-node':
+            test_result = generate_node_tests(file_content, file_path, test_config, project_context)
+        elif agent == 'database':
+            test_result = generate_database_tests(file_content, file_path, test_config, project_context)
+        elif agent == 'devops':
+            test_result = generate_devops_tests(file_content, file_path, test_config, project_context)
+        elif agent == 'mobile':
+            test_result = generate_mobile_tests(file_content, file_path, test_config, project_context)
+        else:
+            test_result = generate_general_tests(file_content, file_path, language, test_config, project_context)
+        
+        return jsonify({
+            'success': True,
+            'agent': agent,
+            'test_code': test_result['code'],
+            'explanation': test_result['explanation'],
+            'coverage_areas': test_result['coverage_areas'],
+            'test_framework': test_result.get('framework', 'unknown')
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/ai/optimize-code', methods=['POST'])
+def optimize_code_ai():
+    """AI-powered code optimization with technology-specific improvements"""
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+        file_content = data.get('file_content')
+        language = data.get('language')
+        agent = data.get('agent', 'general')
+        project_context = data.get('project_context', {})
+        
+        # Route to appropriate optimizer
+        if agent == 'frontend-react':
+            optimizations = optimize_react_code(file_content, file_path, project_context)
+        elif agent == 'backend-python':
+            optimizations = optimize_python_code(file_content, file_path, project_context)
+        elif agent == 'backend-node':
+            optimizations = optimize_node_code(file_content, file_path, project_context)
+        elif agent == 'database':
+            optimizations = optimize_database_code(file_content, file_path, project_context)
+        elif agent == 'devops':
+            optimizations = optimize_devops_code(file_content, file_path, project_context)
+        elif agent == 'mobile':
+            optimizations = optimize_mobile_code(file_content, file_path, project_context)
+        else:
+            optimizations = optimize_general_code(file_content, file_path, language, project_context)
+        
+        return jsonify({
+            'success': True,
+            'agent': agent,
+            'optimizations': optimizations
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/ai/chat', methods=['POST'])
+def chat_ai():
+    """AI-powered contextual chat about code with technology-specific knowledge"""
+    try:
+        data = request.get_json()
+        message = data.get('message')
+        file_path = data.get('file_path')
+        file_content = data.get('file_content')
+        language = data.get('language')
+        agent = data.get('agent', 'general')
+        chat_history = data.get('chat_history', [])
+        project_context = data.get('project_context', {})
+        
+        # Route to appropriate chat agent
+        if agent == 'frontend-react':
+            response = chat_react_expert(message, file_content, file_path, chat_history, project_context)
+        elif agent == 'backend-python':
+            response = chat_python_expert(message, file_content, file_path, chat_history, project_context)
+        elif agent == 'backend-node':
+            response = chat_node_expert(message, file_content, file_path, chat_history, project_context)
+        elif agent == 'database':
+            response = chat_database_expert(message, file_content, file_path, chat_history, project_context)
+        elif agent == 'devops':
+            response = chat_devops_expert(message, file_content, file_path, chat_history, project_context)
+        elif agent == 'mobile':
+            response = chat_mobile_expert(message, file_content, file_path, chat_history, project_context)
+        else:
+            response = chat_general_expert(message, file_content, file_path, language, chat_history, project_context)
+        
+        return jsonify({
+            'success': True,
+            'agent': agent,
+            'response': response,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/ai/analyze-directory', methods=['POST'])
+def analyze_directory_ai():
+    """AI-powered directory structure analysis and optimization suggestions"""
+    try:
+        data = request.get_json()
+        project_id = data.get('project_id')
+        branch = data.get('branch', 'main')
+        
+        # Get complete project structure
+        file_tree = get_complete_project_structure(project_id, branch)
+        
+        # Analyze directory structure
+        analysis = analyze_project_structure(file_tree, project_id)
+        
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'suggestions': analysis.get('suggestions', []),
+            'score': analysis.get('organization_score', 0),
+            'issues': analysis.get('issues', [])
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001) 
