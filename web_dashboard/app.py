@@ -9,7 +9,7 @@ import json
 import os
 import logging
 from datetime import datetime
-from routes.gitlab_routes import gitlab_bp
+from routes.gitlab_api import gitlab_bp, init_gitlab
 from config.gitlab_config import GitLabConfig
 from dotenv import load_dotenv
 
@@ -53,6 +53,17 @@ app.config.update(
     APPLICATION_ROOT='/',
 )
 
+# Initialize GitLab connection
+gitlab_config = GitLabConfig()
+if gitlab_config.is_configured:
+    init_success = init_gitlab(gitlab_config.url, gitlab_config.token)
+    if init_success:
+        logger.info("GitLab connection initialized successfully")
+    else:
+        logger.error("Failed to initialize GitLab connection")
+else:
+    logger.warning("GitLab configuration not found")
+
 # Register GitLab blueprint with the correct URL prefix
 app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
 
@@ -78,7 +89,6 @@ def dashboard():
             logger.warning(f"Found invalid GitLab token in session, clearing it: {str(e)}")
             session.pop('gitlab_token', None)
     
-    gitlab_config = GitLabConfig()
     gitlab_connected = 'gitlab_token' in session
     logger.info(f"GitLab connection status: {'Connected' if gitlab_connected else 'Not connected'}")
     
@@ -188,9 +198,9 @@ def connected_projects():
         return jsonify([])
         
     try:
-        # Use the gitlab_routes blueprint to get projects
-        from routes.gitlab_routes import list_projects
-        return list_projects()
+        # Use the gitlab_api blueprint to get projects
+        from routes.gitlab_api import get_projects
+        return get_projects()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

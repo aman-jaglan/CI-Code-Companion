@@ -39,7 +39,8 @@ function repositoryBrowser() {
             files: false,
             commits: false,
             pullrequests: false,
-            insights: true
+            insights: true,
+            dependencies: false
         },
         
         // Enhanced file tree state
@@ -69,6 +70,25 @@ function repositoryBrowser() {
         // Diff decorations storage
         _diffDecorations: [],
         
+        // Dependency Graph System
+        dependencyGraph: { nodes: [], edges: [] },
+        dependencyCache: new Map(),
+        loadingGraph: false,
+        loadingFullGraph: false,
+        showGraphModal: false,
+        selectedNode: null,
+        graphLayout: 'force',
+        graphFilter: 'all',
+        graphFilters: {
+            imports: true,
+            functions: true,
+            classes: true
+        },
+        
+        // Graph visualization instances
+        miniGraphInstance: null,
+        fullGraphInstance: null,
+        
         init() {
             console.log('=== Repository Browser Initializing ===');
             try {
@@ -77,6 +97,14 @@ function repositoryBrowser() {
                 
                 // Add window resize handler for Monaco editor
                 this.setupWindowResizeHandler();
+                
+                // Pre-warm Monaco workers for better performance
+                console.log('🔥 Starting Monaco pre-warming...');
+                this.preWarmMonacoWorkers().then(() => {
+                    console.log('🟩 Monaco pre-warming completed');
+                }).catch(error => {
+                    console.warn('🟨 Monaco pre-warming failed:', error);
+                });
                 
                 console.log('Repository Browser initialized successfully');
             } catch (error) {
@@ -423,6 +451,661 @@ function repositoryBrowser() {
             };
             
             return langMap[ext] || 'Text';
+        },
+
+        // === DEPENDENCY GRAPH SYSTEM ===
+        
+        async loadDependencyGraph() {
+            if (this.loadingGraph) return;
+            
+            console.log('=== Loading Dependency Graph ===');
+            this.loadingGraph = true;
+            
+            try {
+                // Check cache first
+                const cacheKey = `${this.projectId}-${this.currentBranch}`;
+                if (this.dependencyCache.has(cacheKey)) {
+                    console.log('Loading graph from cache');
+                    this.dependencyGraph = this.dependencyCache.get(cacheKey);
+                    this.renderMiniGraph();
+                    return;
+                }
+                
+                // Fetch dependency analysis from backend
+                const response = await fetch(`/gitlab/repository/${this.projectId}/dependencies?branch=${this.currentBranch}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to load dependencies: ${response.status}`);
+                }
+                
+                const dependencyData = await response.json();
+                console.log('Dependency analysis loaded:', dependencyData);
+                
+                // Process and cache the dependency graph
+                this.dependencyGraph = this.processDependencyData(dependencyData);
+                this.dependencyCache.set(cacheKey, this.dependencyGraph);
+                
+                // Render mini graph
+                this.renderMiniGraph();
+                
+                this.showNotification('success', `Dependency graph loaded: ${this.dependencyGraph.nodes.length} files, ${this.dependencyGraph.edges.length} connections`);
+                
+            } catch (error) {
+                console.error('Error loading dependency graph:', error);
+                this.showNotification('error', `Failed to load dependency graph: ${error.message}`);
+            } finally {
+                this.loadingGraph = false;
+            }
+        },
+        
+        processDependencyData(data) {
+            console.log('Processing dependency data...');
+            
+            const nodes = [];
+            const edges = [];
+            const nodeMap = new Map();
+            
+            // Create nodes for each file
+            data.files.forEach((file, index) => {
+                const node = {
+                    id: `file-${index}`,
+                    name: file.path.split('/').pop(),
+                    fullPath: file.path,
+                    type: this.getFileLanguage({ name: file.path }),
+                    size: file.size || 1,
+                    dependencies: file.dependencies || [],
+                    exports: file.exports || [],
+                    imports: file.imports || [],
+                    functions: file.functions || [],
+                    classes: file.classes || [],
+                    connections: 0
+                };
+                
+                nodes.push(node);
+                nodeMap.set(file.path, node);
+            });
+            
+            // Create edges for dependencies
+            data.files.forEach(file => {
+                const sourceNode = nodeMap.get(file.path);
+                if (!sourceNode) return;
+                
+                // Import dependencies
+                (file.imports || []).forEach(importPath => {
+                    const targetNode = nodeMap.get(importPath);
+                    if (targetNode && sourceNode.id !== targetNode.id) {
+                        edges.push({
+                            id: `${sourceNode.id}-${targetNode.id}`,
+                            source: sourceNode.id,
+                            target: targetNode.id,
+                            type: 'import',
+                            weight: 1
+                        });
+                        sourceNode.connections++;
+                        targetNode.connections++;
+                    }
+                });
+                
+                // Function call dependencies
+                (file.function_calls || []).forEach(funcCall => {
+                    const targetNode = Array.from(nodeMap.values()).find(n => 
+                        n.functions.some(f => f.name === funcCall.function)
+                    );
+                    if (targetNode && sourceNode.id !== targetNode.id) {
+                        edges.push({
+                            id: `${sourceNode.id}-${targetNode.id}-func`,
+                            source: sourceNode.id,
+                            target: targetNode.id,
+                            type: 'function_call',
+                            weight: 0.5
+                        });
+                        sourceNode.connections++;
+                        targetNode.connections++;
+                    }
+                });
+            });
+            
+            console.log(`Processed ${nodes.length} nodes and ${edges.length} edges`);
+            return { nodes, edges, metadata: data.metadata || {} };
+        },
+        
+        renderMiniGraph() {
+            if (!this.dependencyGraph.nodes.length) return;
+            
+            const canvas = document.getElementById('dependency-graph-mini');
+            if (!canvas) return;
+            
+            // Check if we should use vis-network or canvas fallback
+            if (window.visNetworkLoaded === true) {
+                // Use vis-network for interactive mini graph
+                this.renderMiniGraphWithVis(canvas);
+            } else {
+                // Use canvas fallback for simple visualization
+                this.renderMiniGraphWithCanvas(canvas);
+            }
+        },
+        
+        renderMiniGraphWithCanvas(canvas) {
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            
+            // Clear canvas
+            ctx.fillStyle = '#1f2937';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Simple force-directed layout for mini preview
+            const nodes = this.dependencyGraph.nodes.slice(0, 20); // Limit for performance
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = Math.min(canvas.width, canvas.height) / 3;
+            
+            // Position nodes in a circle
+            nodes.forEach((node, index) => {
+                const angle = (index / nodes.length) * 2 * Math.PI;
+                node.x = centerX + Math.cos(angle) * radius;
+                node.y = centerY + Math.sin(angle) * radius;
+            });
+            
+            // Draw edges
+            ctx.strokeStyle = '#4b5563';
+            ctx.lineWidth = 1;
+            this.dependencyGraph.edges.forEach(edge => {
+                const sourceNode = nodes.find(n => n.id === edge.source);
+                const targetNode = nodes.find(n => n.id === edge.target);
+                
+                if (sourceNode && targetNode) {
+                    ctx.beginPath();
+                    ctx.moveTo(sourceNode.x, sourceNode.y);
+                    ctx.lineTo(targetNode.x, targetNode.y);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw nodes
+            nodes.forEach(node => {
+                const nodeRadius = Math.max(3, Math.min(8, node.connections));
+                
+                // Node color based on type
+                const colors = {
+                    'Python': '#3b82f6',
+                    'JavaScript': '#f59e0b',
+                    'TypeScript': '#6366f1',
+                    'JSON': '#10b981',
+                    'CSS': '#ec4899'
+                };
+                
+                ctx.fillStyle = colors[node.type] || '#6b7280';
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                // Highlight highly connected nodes
+                if (node.connections > 3) {
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            });
+        },
+        
+        renderMiniGraphWithVis(canvas) {
+            // Convert canvas to a div for vis-network
+            const container = canvas.parentNode;
+            const visDiv = document.createElement('div');
+            visDiv.id = 'dependency-graph-mini-vis';
+            visDiv.style.width = '100%';
+            visDiv.style.height = '100%';
+            
+            container.replaceChild(visDiv, canvas);
+            
+            try {
+                const nodes = new vis.DataSet(this.dependencyGraph.nodes.slice(0, 15).map(node => ({
+                    id: node.id,
+                    label: node.name.length > 10 ? node.name.substring(0, 10) + '...' : node.name,
+                    size: Math.max(5, Math.min(15, node.connections * 2)),
+                    color: this.getNodeColor(node).background,
+                    font: { color: '#e5e7eb', size: 8 }
+                })));
+                
+                const edges = new vis.DataSet(this.dependencyGraph.edges.filter(edge => {
+                    const sourceExists = nodes.get(edge.source);
+                    const targetExists = nodes.get(edge.target);
+                    return sourceExists && targetExists;
+                }).slice(0, 20).map(edge => ({
+                    from: edge.source,
+                    to: edge.target,
+                    color: this.getEdgeColor(edge.type),
+                    width: 1
+                })));
+                
+                const data = { nodes, edges };
+                const options = {
+                    layout: { randomSeed: 2 },
+                    physics: { enabled: false },
+                    interaction: { dragNodes: false, dragView: false, zoomView: false },
+                    nodes: { borderWidth: 0, font: { size: 8 } },
+                    edges: { smooth: false }
+                };
+                
+                this.miniGraphInstance = new vis.Network(visDiv, data, options);
+            } catch (error) {
+                console.error('Error rendering mini graph with vis:', error);
+                // Fall back to canvas if vis fails
+                const newCanvas = document.createElement('canvas');
+                newCanvas.id = 'dependency-graph-mini';
+                newCanvas.className = 'w-full h-full cursor-pointer';
+                newCanvas.addEventListener('click', () => this.openFullGraphView());
+                container.replaceChild(newCanvas, visDiv);
+                this.renderMiniGraphWithCanvas(newCanvas);
+            }
+        },
+        
+        openFullGraphView() {
+            console.log('Opening full graph view');
+            
+            // Check if we have dependency data
+            if (!this.dependencyGraph.nodes.length) {
+                this.showNotification('warning', 'No dependency data available. Please load the dependency graph first.');
+                return;
+            }
+            
+            // Open modal regardless of vis-network status
+            this.showGraphModal = true;
+            this.loadingFullGraph = true;
+            
+            // Wait for vis-network to be ready (or fallback to be ready)
+            const renderGraph = () => {
+                this.renderFullGraph();
+                this.loadingFullGraph = false;
+            };
+            
+            if (window.visNetworkLoaded) {
+                // Already loaded (either real or fallback)
+                setTimeout(renderGraph, 100);
+            } else {
+                // Wait for vis-network to load
+                const timeout = setTimeout(() => {
+                    console.log('Timeout waiting for vis-network, using fallback');
+                    renderGraph();
+                }, 3000);
+                
+                window.addEventListener('visNetworkReady', () => {
+                    clearTimeout(timeout);
+                    renderGraph();
+                }, { once: true });
+            }
+        },
+        
+        renderFullGraph() {
+            const container = document.getElementById('dependency-graph-full');
+            if (!container || !this.dependencyGraph.nodes.length) return;
+            
+            // Clear previous instance
+            if (this.fullGraphInstance) {
+                try {
+                    this.fullGraphInstance.destroy();
+                } catch (e) {
+                    console.warn('Error destroying previous graph instance:', e);
+                }
+                this.fullGraphInstance = null;
+            }
+            
+            // Check vis-network availability and render accordingly
+            if (window.visNetworkLoaded === true) {
+                this.renderFullGraphWithVis(container);
+            } else if (window.visNetworkLoaded === 'fallback') {
+                this.renderFullGraphFallback(container);
+            } else {
+                this.renderFullGraphFallback(container);
+            }
+        },
+        
+        renderFullGraphWithVis(container) {
+            try {
+                // Initialize vis.js network with correct API
+                const nodes = new vis.DataSet(this.dependencyGraph.nodes.map(node => ({
+                    id: node.id,
+                    label: node.name,
+                    title: `${node.fullPath}\nType: ${node.type}\nConnections: ${node.connections}`,
+                    size: Math.max(10, Math.min(30, node.connections * 3)),
+                    color: this.getNodeColor(node),
+                    font: { color: '#e5e7eb', size: 12 },
+                    borderWidth: 2,
+                    borderColor: '#374151'
+                })));
+                
+                const edges = new vis.DataSet(this.dependencyGraph.edges.map(edge => ({
+                    id: edge.id,
+                    from: edge.source,
+                    to: edge.target,
+                    color: this.getEdgeColor(edge.type),
+                    width: edge.weight * 2,
+                    arrows: 'to',
+                    smooth: { type: 'continuous' }
+                })));
+                
+                const data = { nodes, edges };
+                const options = {
+                    layout: {
+                        improvedLayout: true,
+                        clusterThreshold: 150
+                    },
+                    physics: {
+                        enabled: true,
+                        stabilization: { iterations: 100 }
+                    },
+                    interaction: {
+                        hover: true,
+                        selectConnectedEdges: false
+                    },
+                    nodes: {
+                        shape: 'dot',
+                        scaling: { min: 10, max: 30 }
+                    },
+                    edges: {
+                        smooth: true,
+                        scaling: { min: 1, max: 5 }
+                    }
+                };
+                
+                this.fullGraphInstance = new vis.Network(container, data, options);
+                
+                // Add event listeners
+                this.fullGraphInstance.on('selectNode', (params) => {
+                    if (params.nodes.length > 0) {
+                        const nodeId = params.nodes[0];
+                        this.selectedNode = this.dependencyGraph.nodes.find(n => n.id === nodeId);
+                    }
+                });
+                
+                this.fullGraphInstance.on('deselectNode', () => {
+                    this.selectedNode = null;
+                });
+                
+                console.log('Full dependency graph rendered successfully with vis-network');
+                
+            } catch (error) {
+                console.error('Error rendering full graph with vis:', error);
+                this.renderFullGraphFallback(container);
+            }
+        },
+        
+        renderFullGraphFallback(container) {
+            console.log('Using fallback graph visualization');
+            
+            // Create a comprehensive fallback interface
+            container.innerHTML = `
+                <div class="h-full bg-gray-800 p-6 overflow-y-auto">
+                    <div class="text-center mb-6">
+                        <i class="fas fa-project-diagram text-4xl mb-4 text-blue-400"></i>
+                        <h3 class="text-xl font-medium text-white mb-2">Dependency Analysis</h3>
+                        <p class="text-sm text-gray-400">Interactive visualization unavailable - showing data view</p>
+                    </div>
+                    
+                    <!-- Statistics -->
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="bg-gray-700 rounded-lg p-4 text-center">
+                            <div class="text-2xl font-bold text-blue-400">${this.dependencyGraph.nodes.length}</div>
+                            <div class="text-sm text-gray-300">Files Analyzed</div>
+                        </div>
+                        <div class="bg-gray-700 rounded-lg p-4 text-center">
+                            <div class="text-2xl font-bold text-green-400">${this.dependencyGraph.edges.length}</div>
+                            <div class="text-sm text-gray-300">Dependencies Found</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Top Connected Files -->
+                    <div class="mb-6">
+                        <h4 class="text-lg font-medium text-white mb-3 flex items-center">
+                            <i class="fas fa-star mr-2 text-yellow-400"></i>
+                            Most Connected Files
+                        </h4>
+                        <div class="space-y-2">
+                            ${this.getTopConnectedFiles().map(file => `
+                                <div class="bg-gray-700 rounded p-3 flex justify-between items-center">
+                                    <div>
+                                        <div class="font-mono text-sm text-white">${file.name}</div>
+                                        <div class="text-xs text-gray-400">Type: ${this.dependencyGraph.nodes.find(n => n.id === file.id)?.type || 'Unknown'}</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-lg font-bold text-blue-400">${file.connections}</div>
+                                        <div class="text-xs text-gray-400">connections</div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    
+                    <!-- File List -->
+                    <div>
+                        <h4 class="text-lg font-medium text-white mb-3 flex items-center">
+                            <i class="fas fa-list mr-2 text-green-400"></i>
+                            All Files (${this.dependencyGraph.nodes.length})
+                        </h4>
+                        <div class="space-y-1 max-h-96 overflow-y-auto">
+                            ${this.dependencyGraph.nodes.map(node => `
+                                <div class="bg-gray-700 rounded p-2 flex justify-between items-center hover:bg-gray-600 cursor-pointer"
+                                     onclick="this.classList.toggle('bg-gray-600')">
+                                    <div class="flex items-center space-x-2">
+                                        <div class="w-3 h-3 rounded-full" style="background-color: ${this.getNodeColor(node).background}"></div>
+                                        <span class="font-mono text-sm text-white">${node.name}</span>
+                                        <span class="text-xs text-gray-400">(${node.type})</span>
+                                    </div>
+                                    <div class="text-xs text-blue-400">${node.connections} deps</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            console.log('Fallback graph visualization rendered');
+        },
+        
+        getNodeColor(node) {
+            const typeColors = {
+                'Python': { background: '#3b82f6', border: '#1e40af' },
+                'JavaScript': { background: '#f59e0b', border: '#d97706' },
+                'TypeScript': { background: '#6366f1', border: '#4f46e5' },
+                'JSON': { background: '#10b981', border: '#059669' },
+                'CSS': { background: '#ec4899', border: '#db2777' },
+                'HTML': { background: '#f97316', border: '#ea580c' },
+                'Markdown': { background: '#6b7280', border: '#4b5563' }
+            };
+            
+            return typeColors[node.type] || { background: '#6b7280', border: '#4b5563' };
+        },
+        
+        getEdgeColor(type) {
+            const edgeColors = {
+                'import': '#10b981',
+                'function_call': '#3b82f6',
+                'class_inheritance': '#8b5cf6',
+                'export': '#f59e0b'
+            };
+            
+            return edgeColors[type] || '#6b7280';
+        },
+        
+        // Graph utility methods
+        getTopConnectedFiles() {
+            if (!this.dependencyGraph.nodes.length) return [];
+            
+            return this.dependencyGraph.nodes
+                .sort((a, b) => b.connections - a.connections)
+                .slice(0, 5)
+                .map(node => ({
+                    id: node.id,
+                    name: node.name,
+                    connections: node.connections
+                }));
+        },
+        
+        getNodeConnections(node) {
+            if (!node || !this.dependencyGraph.edges.length) return [];
+            
+            const connections = [];
+            this.dependencyGraph.edges.forEach(edge => {
+                if (edge.source === node.id) {
+                    const targetNode = this.dependencyGraph.nodes.find(n => n.id === edge.target);
+                    if (targetNode) {
+                        connections.push({
+                            id: targetNode.id,
+                            name: targetNode.name,
+                            type: edge.type
+                        });
+                    }
+                }
+                if (edge.target === node.id) {
+                    const sourceNode = this.dependencyGraph.nodes.find(n => n.id === edge.source);
+                    if (sourceNode) {
+                        connections.push({
+                            id: sourceNode.id,
+                            name: sourceNode.name,
+                            type: edge.type
+                        });
+                    }
+                }
+            });
+            
+            return connections;
+        },
+        
+        getConnectionTypeColor(type) {
+            const colors = {
+                'import': 'text-green-400',
+                'function_call': 'text-blue-400',
+                'class_inheritance': 'text-purple-400',
+                'export': 'text-yellow-400'
+            };
+            return colors[type] || 'text-gray-400';
+        },
+        
+        getAverageConnections() {
+            if (!this.dependencyGraph.nodes.length) return '0.0';
+            const total = this.dependencyGraph.nodes.reduce((sum, node) => sum + node.connections, 0);
+            return (total / this.dependencyGraph.nodes.length).toFixed(1);
+        },
+        
+        getMaxConnections() {
+            if (!this.dependencyGraph.nodes.length) return 0;
+            return Math.max(...this.dependencyGraph.nodes.map(node => node.connections));
+        },
+        
+        // Graph controls
+        toggleGraphFilter(filterType) {
+            this.graphFilters[filterType] = !this.graphFilters[filterType];
+            if (this.fullGraphInstance) {
+                this.renderFullGraph(); // Re-render with new filters
+            }
+        },
+        
+        updateGraphLayout() {
+            if (!this.fullGraphInstance) return;
+            
+            const layoutOptions = {
+                force: { physics: { enabled: true } },
+                hierarchical: { 
+                    layout: { hierarchical: { direction: 'UD', sortMethod: 'directed' } },
+                    physics: { enabled: false }
+                },
+                circular: {
+                    layout: { randomSeed: 2 },
+                    physics: { enabled: false }
+                },
+                grid: {
+                    layout: { randomSeed: undefined },
+                    physics: { enabled: false }
+                }
+            };
+            
+            this.fullGraphInstance.setOptions(layoutOptions[this.graphLayout] || layoutOptions.force);
+        },
+        
+        centerGraph() {
+            if (this.fullGraphInstance) {
+                this.fullGraphInstance.fit();
+            }
+        },
+        
+        exportGraph() {
+            const graphData = {
+                nodes: this.dependencyGraph.nodes,
+                edges: this.dependencyGraph.edges,
+                metadata: {
+                    project: this.projectName,
+                    branch: this.currentBranch,
+                    exported: new Date().toISOString()
+                }
+            };
+            
+            const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${this.projectName}-dependency-graph.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        },
+        
+        refreshDependencyCache() {
+            const cacheKey = `${this.projectId}-${this.currentBranch}`;
+            this.dependencyCache.delete(cacheKey);
+            this.loadDependencyGraph();
+        },
+        
+        // === MULTI-FILE EDIT SUPPORT ===
+        
+        getConnectedFiles(filePath) {
+            if (!this.dependencyGraph.nodes.length) return [];
+            
+            const currentNode = this.dependencyGraph.nodes.find(n => n.fullPath === filePath);
+            if (!currentNode) return [];
+            
+            const connectedFiles = this.getNodeConnections(currentNode);
+            return connectedFiles.map(conn => ({
+                path: this.dependencyGraph.nodes.find(n => n.id === conn.id)?.fullPath,
+                type: conn.type,
+                name: conn.name
+            })).filter(f => f.path);
+        },
+        
+        async updateMultipleFiles(changes) {
+            // This will be called when AI makes changes to multiple connected files
+            console.log('Updating multiple connected files:', changes);
+            
+            const results = [];
+            for (const change of changes) {
+                try {
+                    const result = await this.updateSingleFile(change.path, change.content, change.message);
+                    results.push({ ...change, success: true, result });
+                } catch (error) {
+                    results.push({ ...change, success: false, error: error.message });
+                }
+            }
+            
+            return results;
+        },
+        
+        async updateSingleFile(filePath, content, commitMessage) {
+            const response = await fetch(`/gitlab/repository/${this.projectId}/commit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_path: filePath,
+                    branch: this.currentBranch,
+                    content: content,
+                    commit_message: commitMessage || `Update ${filePath}`
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to update ${filePath}: ${response.status}`);
+            }
+            
+            return response.json();
         }
     };
 } 

@@ -116,17 +116,46 @@
 
                 const projects = await response.json();
                 
+                // Debug: Log what we actually received
+                console.log('Raw API response:', projects);
+                console.log('Type of projects:', typeof projects);
+                console.log('Is array:', Array.isArray(projects));
+                
+                // Handle different response formats
+                let projectList;
+                if (Array.isArray(projects)) {
+                    projectList = projects;
+                } else if (projects && Array.isArray(projects.projects)) {
+                    // Handle wrapped response: { projects: [...] }
+                    projectList = projects.projects;
+                } else if (projects && Array.isArray(projects.data)) {
+                    // Handle wrapped response: { data: [...] }
+                    projectList = projects.data;
+                } else if (projects && typeof projects === 'object') {
+                    // Handle single project or object response
+                    projectList = Object.values(projects).filter(item => 
+                        item && typeof item === 'object' && item.id
+                    );
+                } else {
+                    // Fallback to empty array
+                    console.warn('Unexpected API response format:', projects);
+                    projectList = [];
+                }
+                
+                console.log('Processed project list:', projectList);
+                console.log('Project count:', projectList.length);
+                
                 // Hide loading state
                 loadingState.classList.add('hidden');
 
-                if (projects.length === 0) {
+                if (projectList.length === 0) {
                     emptyState.classList.remove('hidden');
                     return;
                 }
 
                 // Show projects grid
                 projectsGrid.classList.remove('hidden');
-                renderProjects(projects);
+                renderProjects(projectList);
 
             } catch (error) {
                 console.error('Error loading projects:', error);
@@ -142,50 +171,96 @@
             const grid = document.getElementById('projects-grid');
             grid.innerHTML = '';
 
-            projects.forEach(project => {
-                const projectCard = document.createElement('div');
-                projectCard.className = 'project-card bg-white rounded-lg shadow-md p-6 cursor-pointer';
-                projectCard.onclick = () => openRepository(project);
+            // Safety check
+            if (!Array.isArray(projects)) {
+                console.error('renderProjects: Expected array but got:', typeof projects, projects);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'col-span-full text-center p-8 bg-red-50 rounded-lg border border-red-200';
+                errorDiv.innerHTML = `
+                    <i class="fas fa-exclamation-triangle text-red-500 text-3xl mb-3"></i>
+                    <p class="text-red-700 font-medium">Error: Invalid project data format</p>
+                    <p class="text-red-600 text-sm mt-1">Expected array but received: ${typeof projects}</p>
+                `;
+                grid.appendChild(errorDiv);
+                return;
+            }
 
-                const description = project.description || 'No description available';
-                const truncatedDescription = description.length > 100 
-                    ? description.substring(0, 100) + '...' 
-                    : description;
+            if (projects.length === 0) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'col-span-full text-center p-8 text-gray-500';
+                emptyDiv.innerHTML = `
+                    <i class="fab fa-gitlab text-gray-400 text-4xl mb-3"></i>
+                    <p>No projects found</p>
+                `;
+                grid.appendChild(emptyDiv);
+                return;
+            }
 
-                projectCard.innerHTML = `
-                    <div class="flex items-start justify-between mb-4">
-                        <div class="flex items-center">
-                            <i class="fab fa-gitlab text-orange-500 text-2xl mr-3"></i>
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-900">${project.name}</h3>
-                                <div class="flex items-center text-sm text-gray-500 mt-1">
-                                    <i class="fas fa-code-branch mr-1"></i>
-                                    <span>${project.default_branch || 'main'}</span>
+            projects.forEach((project, index) => {
+                try {
+                    // Safety check for project object
+                    if (!project || typeof project !== 'object') {
+                        console.warn(`Skipping invalid project at index ${index}:`, project);
+                        return;
+                    }
+
+                    const projectCard = document.createElement('div');
+                    projectCard.className = 'project-card bg-white rounded-lg shadow-md p-6 cursor-pointer';
+                    projectCard.onclick = () => openRepository(project);
+
+                    // Safe property access with fallbacks
+                    const projectName = project.name || project.path_with_namespace || `Project ${project.id || index}`;
+                    const description = project.description || 'No description available';
+                    const truncatedDescription = description.length > 100 
+                        ? description.substring(0, 100) + '...' 
+                        : description;
+                    const defaultBranch = project.default_branch || 'main';
+                    const projectId = project.id || 'unknown';
+
+                    projectCard.innerHTML = `
+                        <div class="flex items-start justify-between mb-4">
+                            <div class="flex items-center">
+                                <i class="fab fa-gitlab text-orange-500 text-2xl mr-3"></i>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-900">${escapeHtml(projectName)}</h3>
+                                    <div class="flex items-center text-sm text-gray-500 mt-1">
+                                        <i class="fas fa-code-branch mr-1"></i>
+                                        <span>${escapeHtml(defaultBranch)}</span>
+                                    </div>
                                 </div>
                             </div>
+                            <div class="flex items-center text-blue-600">
+                                <i class="fas fa-arrow-right"></i>
+                            </div>
                         </div>
-                        <div class="flex items-center text-blue-600">
-                            <i class="fas fa-arrow-right"></i>
+                        
+                        <p class="text-gray-600 text-sm mb-4">${escapeHtml(truncatedDescription)}</p>
+                        
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                <span class="flex items-center">
+                                    <i class="fas fa-star mr-1"></i>
+                                    Project ID: ${escapeHtml(projectId)}
+                                </span>
+                            </div>
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors">
+                                Browse Code
+                            </button>
                         </div>
-                    </div>
-                    
-                    <p class="text-gray-600 text-sm mb-4">${truncatedDescription}</p>
-                    
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-4 text-xs text-gray-500">
-                            <span class="flex items-center">
-                                <i class="fas fa-star mr-1"></i>
-                                Project ID: ${project.id}
-                            </span>
-                        </div>
-                        <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors">
-                            Browse Code
-                        </button>
-                    </div>
-                `;
+                    `;
 
-                grid.appendChild(projectCard);
+                    grid.appendChild(projectCard);
+                } catch (error) {
+                    console.error(`Error rendering project at index ${index}:`, error, project);
+                }
             });
+        }
+
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         function openRepository(project) {

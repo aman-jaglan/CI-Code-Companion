@@ -20,6 +20,7 @@ sys.path.insert(0, str(project_root / 'src'))
 sys.path.insert(0, str(project_root / 'web_dashboard'))
 
 from web_dashboard.routes.api import api, init_database
+from web_dashboard.routes.gitlab_api import gitlab_bp, init_gitlab
 
 def create_app():
     # Initialize Flask app with correct template and static folders
@@ -34,12 +35,21 @@ def create_app():
     # Register API blueprint
     app.register_blueprint(api)
     
-    # Try to register GitLab routes if available
-    try:
-        from web_dashboard.routes.gitlab_routes import gitlab_bp
-        app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
-    except ImportError:
-        app.logger.warning("GitLab routes not available - some features may be disabled")
+    # Register GitLab API blueprint
+    app.register_blueprint(gitlab_bp, url_prefix='/gitlab')
+    
+    # Initialize GitLab connection
+    gitlab_url = os.getenv('GITLAB_URL', 'https://gitlab.com')
+    gitlab_token = os.getenv('GITLAB_TOKEN')
+    
+    if gitlab_token:
+        init_success = init_gitlab(gitlab_url, gitlab_token)
+        if init_success:
+            app.logger.info("GitLab connection initialized successfully")
+        else:
+            app.logger.error("Failed to initialize GitLab connection")
+    else:
+        app.logger.warning("GitLab token not found in environment variables")
     
     # Configure logging
     logging.basicConfig(
