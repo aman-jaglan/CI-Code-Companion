@@ -7,21 +7,17 @@
     
     <!-- Styles -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/diff-viewer.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/repository-browser.css') }}">
     
     <!-- Scripts -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.js"></script>
     
-    <!-- Monaco Global Initialization - Prevent require.config conflicts -->
+    <!-- Monaco Global Initialization -->
     <script>
-        // Global Monaco initialization to prevent conflicts
         window._requireConfigured = false;
         window._monacoLoading = null;
         
-        // Ensure require.js is properly configured only once
         window.ensureRequireConfig = function() {
             if (!window._requireConfigured) {
                 require.config({ 
@@ -33,557 +29,114 @@
             }
         };
         
-        // Call immediately to set up config
         window.ensureRequireConfig();
     </script>
-    
-    <!-- Vis.js Network for dependency graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/vis-data@7.1.4/standalone/umd/vis-data.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
     
     <script src="{{ url_for('static', filename='js/repository-browser-core.js') }}"></script>
     <script src="{{ url_for('static', filename='js/monaco-utils.js') }}"></script>
     <script src="{{ url_for('static', filename='js/repository-browser-main.js') }}"></script>
 </head>
 
-<body class="bg-gray-900 text-gray-100" x-data="repositoryBrowser()">
-    <!-- Header -->
-    <header class="bg-gray-800 shadow-lg h-16 flex items-center px-6 border-b border-gray-700">
-        <div class="flex items-center flex-1">
-            <!-- Logo and Project Name -->
-            <div class="flex items-center">
-                <a href="/" class="flex items-center text-xl font-bold mr-6 text-white hover:text-blue-400 transition-colors">
-                    <i class="fas fa-code-branch text-green-500 mr-2"></i>
-                    CI Code Companion
+<body class="vscode-theme" x-data="repositoryBrowser()">
+    <!-- Title Bar -->
+    <div class="title-bar">
+        <div class="title-bar-content">
+            <div class="title-info">
+                <i class="fas fa-code-branch"></i>
+                <span class="project-name" x-text="projectName"></span>
+                <span class="branch-info">
+                    <i class="fas fa-code-branch"></i>
+                    <span x-text="currentBranch"></span>
+                </span>
+            </div>
+            <div class="title-actions">
+                <button class="title-action-btn" @click="switchBranch()">
+                    <i class="fas fa-code-branch"></i>
+                    Switch Branch
+                </button>
+                <a href="/projects" class="title-action-btn">
+                    <i class="fas fa-grid-2"></i>
+                    Projects
                 </a>
-                <div class="flex items-center space-x-4 text-gray-300">
-                    <i class="fab fa-gitlab text-orange-500"></i>
-                    <span x-text="projectName" class="font-medium">Loading...</span>
-                    <span class="text-gray-500">/</span>
-                    <div class="flex items-center bg-gray-700 px-3 py-1 rounded">
-                        <i class="fas fa-code-branch mr-2 text-sm"></i>
-                        <select x-model="currentBranch" @change="switchBranch()" class="bg-transparent text-white text-sm border-none outline-none">
-                            <template x-for="branch in branches" :key="branch.name">
-                                <option :value="branch.name" x-text="branch.name"></option>
-                            </template>
-                        </select>
-                    </div>
-                </div>
             </div>
         </div>
-        
-        <!-- Header Actions -->
-        <div class="flex items-center space-x-4">
-            <!-- File Actions -->
-            <div x-show="selectedFile" class="flex items-center space-x-3">
-                <button @click="analyzeCode('review')" 
-                        :disabled="loading"
-                        class="action-button btn-ai-review">
-                    <div class="flex items-center space-x-2">
-                        <div x-show="!loading || analysisType !== 'review'" class="flex items-center space-x-2">
-                            <i class="fas fa-robot text-lg"></i>
-                            <span class="font-medium">AI Review</span>
-                        </div>
-                        <div x-show="loading && analysisType === 'review'" class="flex items-center space-x-2">
-                            <div class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                            <span class="font-medium">Analyzing...</span>
-                        </div>
-                    </div>
-                </button>
-                
-                <button @click="analyzeCode('test')" 
-                        :disabled="loading"
-                        class="action-button btn-test-gen">
-                    <div class="flex items-center space-x-2">
-                        <div x-show="!loading || analysisType !== 'test'" class="flex items-center space-x-2">
-                            <i class="fas fa-vial text-lg"></i>
-                            <span class="font-medium">Generate Tests</span>
-                        </div>
-                        <div x-show="loading && analysisType === 'test'" class="flex items-center space-x-2">
-                            <div class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                            <span class="font-medium">Generating...</span>
-                        </div>
-                    </div>
-                </button>
-                
-                <button x-show="hasChanges" @click="commitChanges()" class="action-button btn-commit">
-                    <i class="fas fa-upload"></i>
-                    Commit Changes
-                </button>
-            </div>
-            
-            <!-- Navigation -->
-            <a href="/projects" class="action-button btn-secondary">
-                <i class="fas fa-arrow-left"></i>
-                Back to Projects
-            </a>
-        </div>
-    </header>
+    </div>
 
     <!-- Main Layout -->
     <div class="main-layout">
         <!-- Sidebar -->
         <div class="sidebar">
-            <!-- Global Search Header -->
-            <div class="sidebar-header">
-                <input type="text" x-model="globalSearch" @input="performGlobalSearch()" 
-                       placeholder="Search files, commits, PRs..." class="global-search">
-            </div>
-
-            <!-- Collapsible Sections -->
-            <div class="sidebar-sections">
-                <!-- Files Explorer Section -->
-                <div class="sidebar-section">
-                    <div class="section-header" @click="toggleSection('files')" 
-                         :class="{'collapsed': collapsedSections.files}">
-                        <div class="flex items-center">
-                            <i class="section-icon fas fa-folder-tree"></i>
-                            <span>FILES EXPLORER</span>
-                        </div>
-                        <i class="expand-icon fas fa-chevron-down" 
-                           :class="{'collapsed': collapsedSections.files}"></i>
-                    </div>
-                    
-                    <div class="section-content" :class="{'collapsed': collapsedSections.files}">
-                        <!-- Breadcrumb Navigation -->
-                        <div x-show="currentPath" class="breadcrumb">
-                            <template x-for="(part, index) in pathParts" :key="index">
-                                <span>
-                                    <a href="#" @click="navigateToPath(getPathUpTo(index))" x-text="part"></a>
-                                    <span x-show="index < pathParts.length - 1" class="mx-2 text-gray-500">/</span>
-                                </span>
-                            </template>
-                        </div>
-                        
-                        <!-- Hierarchical File Tree -->
-                        <div class="file-tree">
-                            <template x-for="item in filteredFiles" :key="item.path">
-                                <div class="file-tree-item" 
-                                     @click="handleFileItemClick(item, $event)"
-                                     :class="{
-                                         'selected': selectedFile?.path === item.path,
-                                         'has-issues': item.hasIssues,
-                                         'modified': item.isModified,
-                                         'loading': loading && selectedFile?.path === item.path
-                                     }"
-                                     :style="'padding-left: ' + (item.depth * 20 + 16) + 'px'">
-                                    
-                                    <!-- Tree Toggle -->
-                                    <div class="tree-indent">
-                                        <button x-show="item.type === 'tree'" 
-                                                class="tree-toggle">
-                                            <i :class="item.expanded ? 'fas fa-chevron-down' : 'fas fa-chevron-right'"></i>
-                                        </button>
-                                    </div>
-                                    
-                                    <!-- File Icon -->
-                                    <i :class="getFileIcon(item)" class="file-icon"></i>
-                                    
-                                    <!-- File Name -->
-                                    <span class="flex-1 truncate" x-text="item.name"></span>
-                                    
-                                    <!-- Status Indicators -->
-                                    <div class="file-status" x-show="getFileStatus(item)">
-                                        <span :class="getFileStatusClass(item)" x-text="getFileStatus(item)"></span>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
+            <!-- Horizontal Tabs (VS Code style) -->
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" data-content="files">
+                    <i class="fas fa-folder"></i>
+                    <span>Explorer</span>
                 </div>
-
-                <!-- Commits & History Section -->
-                <div class="sidebar-section">
-                    <div class="section-header" @click="toggleSection('commits')" 
-                         :class="{'collapsed': collapsedSections.commits}">
-                        <div class="flex items-center">
-                            <i class="section-icon fas fa-code-commit"></i>
-                            <span>COMMITS & HISTORY</span>
-                        </div>
-                        <i class="expand-icon fas fa-chevron-down" 
-                           :class="{'collapsed': collapsedSections.commits}"></i>
-                    </div>
-                    
-                    <div class="section-content" :class="{'collapsed': collapsedSections.commits}">
-                        <!-- Branch Selector -->
-                        <div class="branch-selector">
-                            <select x-model="currentBranch" @change="switchBranch()" class="branch-dropdown">
-                                <template x-for="branch in branches" :key="branch.name">
-                                    <option :value="branch.name" x-text="branch.name"></option>
-                                </template>
-                            </select>
-                        </div>
-                        
-                        <!-- Git Graph -->
-                        <div class="git-graph">
-                            <div class="branch-line">
-                                <div class="branch-dot branch-main"></div>
-                                <span x-text="currentBranch">main</span>
-                                <div class="branch-line-svg"></div>
-                                <span class="text-xs">HEAD</span>
-                            </div>
-                            <template x-for="branch in otherBranches" :key="branch.name">
-                                <div class="branch-line">
-                                    <div class="branch-dot" :class="getBranchClass(branch.type)"></div>
-                                    <span x-text="branch.name"></span>
-                                    <div class="branch-line-svg"></div>
-                                </div>
-                            </template>
-                        </div>
-                        
-                        <!-- Commit Timeline -->
-                        <div class="commit-timeline">
-                            <template x-for="commit in commits.slice(0, 10)" :key="commit.id">
-                                <div class="commit-item" @click="viewCommit(commit)">
-                                    <div class="commit-header">
-                                        <div class="commit-avatar" :class="getCommitAuthorClass(commit.author_name)">
-                                            <span x-text="getAuthorInitials(commit.author_name)"></span>
-                                        </div>
-                                        <div class="commit-info">
-                                            <div class="commit-message" x-text="commit.title"></div>
-                                            <div class="commit-meta">
-                                                <span x-text="commit.author_name"></span>
-                                                <span>•</span>
-                                                <span x-text="formatDate(commit.authored_date)"></span>
-                                                <span class="font-mono text-xs" x-text="commit.short_id"></span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="commit-stats">
-                                        <div class="stat-item">
-                                            <i class="fas fa-file-alt"></i>
-                                            <span x-text="commit.files_changed || 0"></span>
-                                        </div>
-                                        <div class="stat-item stat-added">
-                                            <span>+<span x-text="commit.lines_added || 0"></span></span>
-                                        </div>
-                                        <div class="stat-item stat-removed">
-                                            <span>-<span x-text="commit.lines_deleted || 0"></span></span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                        
-                        <!-- Commit Stats -->
-                        <div class="stats-section">
-                            <div class="stats-grid">
-                                <div class="stat-card">
-                                    <div class="stat-value" x-text="commits.length"></div>
-                                    <div class="stat-label">Total Commits</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-value" x-text="getUniqueAuthors().length"></div>
-                                    <div class="stat-label">Contributors</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="sidebar-tab" data-content="search">
+                    <i class="fas fa-search"></i>
+                    <span>Search</span>
                 </div>
-
-                <!-- Pull Requests Section -->
-                <div class="sidebar-section">
-                    <div class="section-header" @click="toggleSection('pullrequests')" 
-                         :class="{'collapsed': collapsedSections.pullrequests}">
-                        <div class="flex items-center">
-                            <i class="section-icon fas fa-code-pull-request"></i>
-                            <span>PULL REQUESTS</span>
-                        </div>
-                        <i class="expand-icon fas fa-chevron-down" 
-                           :class="{'collapsed': collapsedSections.pullrequests}"></i>
-                    </div>
-                    
-                    <div class="section-content" :class="{'collapsed': collapsedSections.pullrequests}">
-                        <!-- PR Filter -->
-                        <div class="pr-filter">
-                            <div class="pr-filter-buttons">
-                                <button @click="prFilter = 'all'" 
-                                        :class="{'active': prFilter === 'all'}" 
-                                        class="filter-btn">All</button>
-                                <button @click="prFilter = 'open'" 
-                                        :class="{'active': prFilter === 'open'}" 
-                                        class="filter-btn">Open</button>
-                                <button @click="prFilter = 'ready'" 
-                                        :class="{'active': prFilter === 'ready'}" 
-                                        class="filter-btn">Ready</button>
-                                <button @click="prFilter = 'draft'" 
-                                        :class="{'active': prFilter === 'draft'}" 
-                                        class="filter-btn">Draft</button>
-                            </div>
-                        </div>
-                        
-                        <!-- PR Groups -->
-                        <div class="pr-container">
-                            <!-- Pinned PRs -->
-                            <div x-show="getPinnedPRs().length > 0" class="pr-group">
-                                <div class="pr-group-header">
-                                    <i class="fas fa-thumbtack mr-2"></i>
-                                    Pinned (<span x-text="getPinnedPRs().length"></span>)
-                                </div>
-                                <template x-for="pr in getPinnedPRs()" :key="pr.id">
-                                    <div class="pr-item" :class="getPRClass(pr)" @click="viewPullRequest(pr)">
-                                        <div class="pr-header">
-                                            <div class="pr-status-icon" :class="getPRStatusClass(pr)">
-                                                <i :class="getPRStatusIcon(pr)"></i>
-                                            </div>
-                                            <div class="pr-content">
-                                                <div class="pr-title" x-text="pr.title"></div>
-                                                <div class="pr-meta">
-                                                    <span x-text="'#' + pr.id"></span>
-                                                    <span>•</span>
-                                                    <span x-text="pr.author?.name"></span>
-                                                    <span>•</span>
-                                                    <span x-text="formatDate(pr.created_at)"></span>
-                                                </div>
-                                                <div class="pr-status-bar">
-                                                    <span x-show="pr.approvals" 
-                                                          :class="getApprovalBadgeClass(pr)" 
-                                                          class="status-badge">
-                                                        <i class="fas fa-check mr-1"></i>
-                                                        <span x-text="pr.approvals + '/2 approvals'"></span>
-                                                    </span>
-                                                    <span x-show="pr.ci_status" 
-                                                          :class="getCIBadgeClass(pr)" 
-                                                          class="status-badge">
-                                                        <i :class="getCIIcon(pr)" class="mr-1"></i>
-                                                        <span x-text="pr.ci_status"></span>
-                                                    </span>
-                                                </div>
-                                                <div x-show="pr.labels && pr.labels.length" class="pr-labels">
-                                                    <template x-for="label in pr.labels" :key="label">
-                                                        <span :class="'label label-' + label" x-text="label"></span>
-                                                    </template>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </template>
-                            </div>
-                            
-                            <!-- Ready to Merge -->
-                            <div x-show="getReadyPRs().length > 0" class="pr-group">
-                                <div class="pr-group-header">
-                                    <i class="fas fa-code-merge mr-2"></i>
-                                    Ready to Merge (<span x-text="getReadyPRs().length"></span>)
-                                </div>
-                                <template x-for="pr in getReadyPRs()" :key="pr.id">
-                                    <div class="pr-item ready" @click="viewPullRequest(pr)">
-                                        <div class="pr-header">
-                                            <div class="pr-status-icon pr-status-ready">
-                                                <i class="fas fa-check"></i>
-                                            </div>
-                                            <div class="pr-content">
-                                                <div class="pr-title" x-text="pr.title"></div>
-                                                <div class="pr-meta" x-text="'#' + pr.id + ' • ' + pr.author?.name"></div>
-                                                <div class="pr-status-bar">
-                                                    <span class="status-badge badge-approved">All checks passed</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </template>
-                            </div>
-                            
-                            <!-- Under Review -->
-                            <div x-show="getReviewPRs().length > 0" class="pr-group">
-                                <div class="pr-group-header">
-                                    <i class="fas fa-eye mr-2"></i>
-                                    Under Review (<span x-text="getReviewPRs().length"></span>)
-                                </div>
-                                <template x-for="pr in getReviewPRs().slice(0, 3)" :key="pr.id">
-                                    <div class="pr-item" @click="viewPullRequest(pr)">
-                                        <div class="pr-header">
-                                            <div class="pr-status-icon pr-status-review">
-                                                <i class="fas fa-eye"></i>
-                                            </div>
-                                            <div class="pr-content">
-                                                <div class="pr-title" x-text="pr.title"></div>
-                                                <div class="pr-meta" x-text="'#' + pr.id + ' • ' + pr.author?.name"></div>
-                                                <div class="pr-status-bar">
-                                                    <span class="status-badge badge-pending">Review pending</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                        
-                        <!-- PR Stats -->
-                        <div class="stats-section">
-                            <div class="stats-grid">
-                                <div class="stat-card">
-                                    <div class="stat-value" x-text="pullRequests.length"></div>
-                                    <div class="stat-label">Total PRs</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-value" x-text="getReadyPRs().length"></div>
-                                    <div class="stat-label">Ready</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="sidebar-tab" data-content="git">
+                    <i class="fas fa-code-branch"></i>
+                    <span>Git</span>
                 </div>
-
-                <!-- AI Insights Section -->
-                <div class="sidebar-section">
-                    <div class="section-header" @click="toggleSection('insights')" 
-                         :class="{'collapsed': collapsedSections.insights}">
-                        <div class="flex items-center">
-                            <i class="section-icon fas fa-robot"></i>
-                            <span>AI INSIGHTS</span>
-                        </div>
-                        <i class="expand-icon fas fa-chevron-down" 
-                           :class="{'collapsed': collapsedSections.insights}"></i>
-                    </div>
-                    
-                    <div class="section-content" :class="{'collapsed': collapsedSections.insights}">
-                        <div class="p-4 text-center text-gray-400 text-sm">
-                            <i class="fas fa-lightbulb text-2xl mb-2"></i>
-                            <p>AI insights will appear here after analysis</p>
-                        </div>
-                    </div>
+                <div class="sidebar-tab" data-content="graph">
+                    <i class="fas fa-project-diagram"></i>
+                    <span>Graph</span>
                 </div>
-
-                <!-- Dependency Graph Section -->
-                <div class="sidebar-section">
-                    <div class="section-header" @click="toggleSection('dependencies')" 
-                         :class="{'collapsed': collapsedSections.dependencies}">
-                        <div class="flex items-center">
-                            <i class="section-icon fas fa-project-diagram"></i>
-                            <span>DEPENDENCY GRAPH</span>
-                        </div>
-                        <i class="expand-icon fas fa-chevron-down" 
-                           :class="{'collapsed': collapsedSections.dependencies}"></i>
-                    </div>
-                    
-                    <div class="section-content" :class="{'collapsed': collapsedSections.dependencies}">
-                        <!-- Graph Controls -->
-                        <div class="p-3 border-b border-gray-600">
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-xs font-medium text-gray-300">GRAPH VIEW</span>
-                                <button @click="loadDependencyGraph()" 
-                                        :disabled="loadingGraph"
-                                        class="text-xs bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-white">
-                                    <i :class="loadingGraph ? 'fas fa-spinner fa-spin' : 'fas fa-sync'"></i>
-                                    <span x-text="loadingGraph ? 'Loading...' : 'Refresh'"></span>
-                                </button>
-                            </div>
-                            
-                            <!-- Graph Type Filter -->
-                            <div class="flex space-x-2 text-xs">
-                                <button @click="graphFilter = 'all'" 
-                                        :class="{'bg-blue-600 text-white': graphFilter === 'all', 'bg-gray-600 text-gray-300': graphFilter !== 'all'}"
-                                        class="px-2 py-1 rounded">All</button>
-                                <button @click="graphFilter = 'imports'" 
-                                        :class="{'bg-blue-600 text-white': graphFilter === 'imports', 'bg-gray-600 text-gray-300': graphFilter !== 'imports'}"
-                                        class="px-2 py-1 rounded">Imports</button>
-                                <button @click="graphFilter = 'functions'" 
-                                        :class="{'bg-blue-600 text-white': graphFilter === 'functions', 'bg-gray-600 text-gray-300': graphFilter !== 'functions'}"
-                                        class="px-2 py-1 rounded">Functions</button>
-                            </div>
-                        </div>
-                        
-                        <!-- Mini Graph Preview -->
-                        <div class="graph-preview-container" style="height: 200px; position: relative;">
-                            <div x-show="!dependencyGraph || dependencyGraph.nodes.length === 0" 
-                                 class="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">
-                                <div class="text-center">
-                                    <i class="fas fa-project-diagram text-2xl mb-2"></i>
-                                    <p>Click "Refresh" to generate<br>dependency graph</p>
-                                </div>
-                            </div>
-                            
-                            <div x-show="loadingGraph" 
-                                 class="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50">
-                                <div class="text-center text-gray-300">
-                                    <i class="fas fa-spinner fa-spin text-xl mb-2"></i>
-                                    <p class="text-xs">Analyzing dependencies...</p>
-                                </div>
-                            </div>
-                            
-                            <!-- Graph Canvas -->
-                            <canvas id="dependency-graph-mini" 
-                                    x-show="dependencyGraph && dependencyGraph.nodes.length > 0"
-                                    class="w-full h-full cursor-pointer"
-                                    @click="openFullGraphView()"></canvas>
-                        </div>
-                        
-                        <!-- Graph Stats -->
-                        <div x-show="dependencyGraph && dependencyGraph.nodes.length > 0" 
-                             class="p-3 border-t border-gray-600">
-                            <div class="grid grid-cols-2 gap-2 text-xs">
-                                <div class="bg-gray-700 rounded p-2 text-center">
-                                    <div class="font-bold text-blue-400" x-text="dependencyGraph.nodes.length"></div>
-                                    <div class="text-gray-400">Files</div>
-                                </div>
-                                <div class="bg-gray-700 rounded p-2 text-center">
-                                    <div class="font-bold text-green-400" x-text="dependencyGraph.edges.length"></div>
-                                    <div class="text-gray-400">Connections</div>
-                                </div>
-                            </div>
-                            
-                            <!-- Most Connected Files -->
-                            <div class="mt-2">
-                                <div class="text-xs font-medium text-gray-300 mb-1">MOST CONNECTED</div>
-                                <template x-for="file in getTopConnectedFiles()" :key="file.id">
-                                    <div class="flex items-center justify-between text-xs py-1">
-                                        <span class="truncate flex-1 text-gray-300" x-text="file.name"></span>
-                                        <span class="text-blue-400 font-medium" x-text="file.connections"></span>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
+                <div class="sidebar-tab" data-content="commits">
+                    <i class="fas fa-history"></i>
+                    <span>Commits</span>
+                </div>
+                <div class="sidebar-tab" data-content="prs">
+                    <i class="fas fa-code-pull-request"></i>
+                    <span>PRs</span>
                 </div>
             </div>
-        </div>
 
-        <!-- Content Area -->
-        <div class="content-area" :class="{'no-bottom-panel': !showBottomPanel}">
-            <!-- Main Content Area -->
-            <div class="main-content">
-                <!-- File Tree Panel -->
-                <div class="file-tree-panel">
-                    <!-- Existing file tree content -->
-                    <div class="file-tree-header">
-                        <h3 class="section-title">
-                            <i class="fas fa-folder-tree mr-2"></i>
-                            Files
-                        </h3>
-                        
-                        <!-- File search -->
-                        <div class="search-container">
-                            <input type="text" 
-                                   x-model="fileSearch"
-                                   @input="performGlobalSearch()"
-                                   placeholder="Search files..."
-                                   class="search-input">
-                            <i class="fas fa-search search-icon"></i>
+            <!-- Sidebar Content -->
+            <div class="sidebar-content-area">
+                <!-- Files Content -->
+                <div class="tab-content active" id="files-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">FILES</h3>
+                        <div class="sidebar-actions">
+                            <button class="sidebar-action" title="New File">
+                                <i class="fas fa-file-plus"></i>
+                            </button>
+                            <button class="sidebar-action" title="New Folder">
+                                <i class="fas fa-folder-plus"></i>
+                            </button>
+                            <button class="sidebar-action" title="Refresh">
+                                <i class="fas fa-sync"></i>
+                            </button>
                         </div>
                     </div>
-
+                    
                     <!-- File Tree -->
-                    <div class="file-tree-content">
+                    <div class="file-tree">
                         <template x-for="item in filteredFiles" :key="item.path">
-                            <div class="file-item"
-                                 :class="[
-                                    `depth-${item.depth}`, 
-                                    item.type, 
-                                    getFileStatusClass(item),
-                                    { 'selected': selectedFile?.path === item.path }
-                                 ]"
+                            <div class="file-item" 
+                                 :class="{ 
+                                     'selected': selectedFile?.path === item.path,
+                                     'modified': item.isModified,
+                                     'has-error': item.hasIssues
+                                 }"
+                                 :style="'padding-left: ' + (item.depth * 12 + 12) + 'px'"
                                  @click="handleFileItemClick(item, $event)">
                                 
                                 <div class="file-item-content">
-                                    <div class="file-icon-container">
-                                        <i :class="getFileIcon(item)"></i>
-                                    </div>
+                                    <i x-show="item.type === 'tree'" 
+                                       :class="item.expanded ? 'fas fa-chevron-down' : 'fas fa-chevron-right'" 
+                                       class="tree-arrow"></i>
+                                    
+                                    <i :class="getFileIcon(item)" class="file-icon"></i>
                                     
                                     <span class="file-name" x-text="item.name"></span>
                                     
                                     <div class="file-status">
-                                        <span class="status-indicator" x-text="getFileStatus(item)"></span>
+                                        <span x-show="item.isModified" class="status-dot modified"></span>
+                                        <span x-show="item.hasIssues" class="status-dot error"></span>
                                     </div>
                                 </div>
                             </div>
@@ -591,521 +144,326 @@
                     </div>
                 </div>
 
-                <!-- Editor Panel -->
-                <div class="editor-panel">
-                    <!-- Editor Header -->
-                    <div class="editor-header">
-                        <div class="editor-tabs">
-                            <div x-show="selectedFile" class="editor-tab active">
-                                <i :class="getFileIcon(selectedFile)" class="mr-2"></i>
-                                <span x-text="selectedFile?.name"></span>
-                                <span x-show="hasChanges" class="ml-2 text-yellow-400">●</span>
+                <!-- Search Content -->
+                <div class="tab-content" id="search-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">SEARCH</h3>
+                    </div>
+                    <div class="search-container">
+                        <input type="text" 
+                               x-model="globalSearch" 
+                               @input="performGlobalSearch()"
+                               placeholder="Search files, content..."
+                               class="search-input">
+                    </div>
+                    <div class="search-results">
+                        <!-- Search results will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Git Content -->
+                <div class="tab-content" id="git-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">SOURCE CONTROL</h3>
+                    </div>
+                    <div class="git-section">
+                        <div class="git-changes">
+                            <h4 class="section-title">Changes</h4>
+                            <div class="changes-list">
+                                <template x-for="file in getModifiedFiles()" :key="file.path">
+                                    <div class="change-item">
+                                        <i :class="getFileIcon(file)" class="file-icon"></i>
+                                        <span class="file-name" x-text="file.name"></span>
+                                        <span class="change-type">M</span>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                         
-                        <div class="editor-actions">
-                            <button x-show="selectedFile && hasChanges" 
-                                    @click="commitChanges()" 
-                                    class="action-button btn-primary">
-                                <i class="fas fa-save mr-1"></i>
+                        <div class="commit-section">
+                            <input type="text" 
+                                   placeholder="Message (press Ctrl+Enter to commit)"
+                                   class="commit-input">
+                            <button class="commit-button" @click="commitChanges()">
+                                <i class="fas fa-check"></i>
                                 Commit
                             </button>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Monaco Editor Container -->
-                    <div class="editor-container">
-                        <div x-show="loading" class="loading-overlay">
-                            <div class="loading-content">
-                                <i class="fas fa-spinner fa-spin text-3xl mb-2"></i>
-                                <p x-text="loadingMessage"></p>
-                            </div>
+                <!-- Graph Content -->
+                <div class="tab-content" id="graph-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">DEPENDENCY GRAPH</h3>
+                        <div class="sidebar-actions">
+                            <button class="sidebar-action" @click="loadDependencyGraph()" title="Refresh Graph">
+                                <i class="fas fa-sync"></i>
+                            </button>
+                            <button class="sidebar-action" @click="openFullGraphView()" title="Full View">
+                                <i class="fas fa-expand"></i>
+                            </button>
                         </div>
-                        
-                        <div x-show="!selectedFile && !loading" class="no-file-selected">
-                            <div class="welcome-message">
-                                <i class="fas fa-code text-4xl text-blue-400 mb-4"></i>
-                                <h3 class="text-xl font-medium mb-2">Welcome to Repository Browser</h3>
-                                <p class="text-gray-400">Select a file from the tree to start editing</p>
-                            </div>
+                    </div>
+                    
+                    <div class="graph-mini-container">
+                        <canvas id="dependency-graph-mini" class="w-full h-32 cursor-pointer"
+                                @click="openFullGraphView()"></canvas>
+                        <div x-show="loadingGraph" class="graph-loading">
+                            <div class="loading-spinner"></div>
+                            <span>Loading graph...</span>
                         </div>
-
-                        <div id="monaco-editor-container"></div>
+                    </div>
+                    
+                    <div class="graph-stats">
+                        <div class="stat-item">
+                            <span class="stat-value" x-text="dependencyGraph.nodes.length"></span>
+                            <span class="stat-label">Files</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" x-text="dependencyGraph.edges.length"></span>
+                            <span class="stat-label">Dependencies</span>
+                        </div>
                     </div>
                 </div>
 
-                <!-- NEW: Right AI Assistant Sidebar -->
-                <div class="ai-assistant-sidebar" :class="{ 'collapsed': collapsedSections.aiAssistant }">
-                    <!-- AI Assistant Header -->
-                    <div class="ai-assistant-header">
-                        <div class="flex items-center justify-between p-4 border-b border-gray-600">
-                            <div class="flex items-center space-x-2">
-                                <i class="fas fa-robot text-blue-400"></i>
-                                <span class="font-medium text-white">AI Assistant</span>
-                            </div>
-                            <button @click="toggleSection('aiAssistant')" 
-                                    class="text-gray-400 hover:text-white">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                        
-                        <!-- Context Info -->
-                        <div x-show="selectedFile" class="context-info p-3 bg-gray-700 border-b border-gray-600">
-                            <div class="flex items-center space-x-2 text-sm">
-                                <i :class="getFileIcon(selectedFile)" class="text-xs"></i>
-                                <span class="text-gray-300" x-text="selectedFile?.name"></span>
-                                <span class="text-gray-500">•</span>
-                                <span class="text-blue-400" x-text="getFileLanguage(selectedFile)"></span>
-                            </div>
-                            <div class="text-xs text-gray-400 mt-1">
-                                <span x-text="fileSize"></span>
-                                <span x-show="hasChanges" class="ml-2 text-yellow-400">• Modified</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- AI Assistant Tabs -->
-                    <div class="ai-assistant-tabs">
-                        <div class="tab-buttons">
-                            <button @click="assistantTab = 'review'" 
-                                    :class="{'active': assistantTab === 'review'}"
-                                    class="tab-button">
-                                <i class="fas fa-search-code"></i>
-                                <span>Review</span>
-                            </button>
-                            <button @click="assistantTab = 'test'" 
-                                    :class="{'active': assistantTab === 'test'}"
-                                    class="tab-button">
-                                <i class="fas fa-vial"></i>
-                                <span>Test</span>
-                            </button>
-                            <button @click="assistantTab = 'optimize'" 
-                                    :class="{'active': assistantTab === 'optimize'}"
-                                    class="tab-button">
-                                <i class="fas fa-rocket"></i>
-                                <span>Optimize</span>
-                            </button>
-                            <button @click="assistantTab = 'chat'" 
-                                    :class="{'active': assistantTab === 'chat'}"
-                                    class="tab-button">
-                                <i class="fas fa-comments"></i>
-                                <span>Chat</span>
+                <!-- Commits Content -->
+                <div class="tab-content" id="commits-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">RECENT COMMITS</h3>
+                        <div class="sidebar-actions">
+                            <button class="sidebar-action" @click="loadCommits()" title="Refresh">
+                                <i class="fas fa-sync"></i>
                             </button>
                         </div>
                     </div>
-
-                    <!-- AI Assistant Content -->
-                    <div class="ai-assistant-content">
-                        <!-- Review Tab -->
-                        <div x-show="assistantTab === 'review'" class="tab-content">
-                            <div class="p-4">
-                                <div class="flex items-center justify-between mb-4">
-                                    <h4 class="font-medium text-white">Code Review</h4>
-                                    <button @click="startFileReview()" 
-                                            :disabled="!selectedFile || reviewLoading"
-                                            class="action-button btn-primary text-sm">
-                                        <i :class="reviewLoading ? 'fas fa-spinner fa-spin' : 'fas fa-search-code'" class="mr-1"></i>
-                                        <span x-text="reviewLoading ? 'Reviewing...' : 'Review File'"></span>
-                                    </button>
+                    
+                    <div class="commits-list">
+                        <template x-for="commit in commits.slice(0, 10)" :key="commit.id">
+                            <div class="commit-item">
+                                <div class="commit-message" x-text="commit.title"></div>
+                                <div class="commit-meta">
+                                    <span class="commit-author" x-text="commit.author_name"></span>
+                                    <span class="commit-time" x-text="formatTimestamp(commit.created_at)"></span>
                                 </div>
-
-                                <!-- Technology Detection -->
-                                <div x-show="selectedFile" class="tech-detection mb-4 p-3 bg-gray-700 rounded">
-                                    <div class="flex items-center space-x-2 mb-2">
-                                        <i class="fas fa-microchip text-purple-400"></i>
-                                        <span class="text-sm font-medium text-white">Detected Technology</span>
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <span class="tech-badge" x-text="detectedTech?.name || 'Unknown'"></span>
-                                        <span class="text-xs text-gray-400" x-text="detectedTech?.confidence ? `${detectedTech.confidence}% confidence` : ''"></span>
-                                    </div>
-                                    <div x-show="detectedTech?.agent" class="text-xs text-blue-400 mt-1">
-                                        Agent: <span x-text="detectedTech.agent"></span>
-                                    </div>
-                                </div>
-
-                                <!-- Review Results -->
-                                <div x-show="reviewResults.length > 0" class="review-results space-y-3">
-                                    <template x-for="result in reviewResults" :key="result.id">
-                                        <div :class="'review-item severity-' + result.severity" class="p-3 rounded border-l-4">
-                                            <div class="flex items-start justify-between mb-2">
-                                                <div class="flex items-center space-x-2">
-                                                    <i :class="getSeverityIcon(result.severity)"></i>
-                                                    <span class="font-medium text-sm" x-text="result.title"></span>
-                                                </div>
-                                                <span :class="getSeverityBadge(result.severity)" 
-                                                      class="px-2 py-1 text-xs rounded" 
-                                                      x-text="result.severity.toUpperCase()"></span>
-                                            </div>
-                                            <p class="text-sm text-gray-300 mb-2" x-text="result.description"></p>
-                                            <div x-show="result.lineNumber" class="text-xs text-gray-400 mb-2">
-                                                Line <span x-text="result.lineNumber"></span>
-                                            </div>
-                                            <div x-show="result.suggestion" class="bg-gray-800 p-2 rounded text-xs">
-                                                <div class="text-blue-400 mb-1">💡 Suggestion:</div>
-                                                <div class="text-gray-300" x-text="result.suggestion"></div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-
-                                <div x-show="!reviewResults.length && !reviewLoading && selectedFile" 
-                                     class="empty-state text-center py-8 text-gray-500">
-                                    <i class="fas fa-search-code text-3xl mb-2"></i>
-                                    <p>Click "Review File" to analyze this file</p>
-                                </div>
+                                <div class="commit-id" x-text="commit.short_id"></div>
                             </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Pull Requests Content -->
+                <div class="tab-content" id="prs-content">
+                    <div class="sidebar-header">
+                        <h3 class="sidebar-title">PULL REQUESTS</h3>
+                        <div class="sidebar-actions">
+                            <button class="sidebar-action" @click="loadPullRequests()" title="Refresh">
+                                <i class="fas fa-sync"></i>
+                            </button>
                         </div>
-
-                        <!-- Test Tab -->
-                        <div x-show="assistantTab === 'test'" class="tab-content">
-                            <div class="p-4">
-                                <div class="flex items-center justify-between mb-4">
-                                    <h4 class="font-medium text-white">Test Generation</h4>
-                                    <button @click="startFileTest()" 
-                                            :disabled="!selectedFile || testLoading"
-                                            class="action-button btn-primary text-sm">
-                                        <i :class="testLoading ? 'fas fa-spinner fa-spin' : 'fas fa-vial'" class="mr-1"></i>
-                                        <span x-text="testLoading ? 'Testing...' : 'Generate Tests'"></span>
-                                    </button>
-                                </div>
-
-                                <!-- Test Configuration -->
-                                <div x-show="selectedFile" class="test-config mb-4">
-                                    <div class="space-y-3">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-300 mb-2">Test Type</label>
-                                            <select x-model="testConfig.type" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm">
-                                                <option value="unit">Unit Tests</option>
-                                                <option value="integration">Integration Tests</option>
-                                                <option value="e2e">End-to-End Tests</option>
-                                                <option value="performance">Performance Tests</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-300 mb-2">Coverage Focus</label>
-                                            <div class="space-y-2">
-                                                <label class="flex items-center">
-                                                    <input type="checkbox" x-model="testConfig.coverageFocus.functions" class="mr-2">
-                                                    <span class="text-sm text-gray-300">Functions</span>
-                                                </label>
-                                                <label class="flex items-center">
-                                                    <input type="checkbox" x-model="testConfig.coverageFocus.edge_cases" class="mr-2">
-                                                    <span class="text-sm text-gray-300">Edge Cases</span>
-                                                </label>
-                                                <label class="flex items-center">
-                                                    <input type="checkbox" x-model="testConfig.coverageFocus.error_handling" class="mr-2">
-                                                    <span class="text-sm text-gray-300">Error Handling</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Test Results -->
-                                <div x-show="testResults" class="test-results">
-                                    <div class="bg-gray-800 rounded p-3 mb-3">
-                                        <div class="flex items-center justify-between mb-2">
-                                            <span class="text-sm font-medium text-green-400">Generated Tests</span>
-                                            <button @click="copyTestCode()" class="text-xs text-blue-400 hover:text-blue-300">
-                                                <i class="fas fa-copy mr-1"></i>Copy
-                                            </button>
-                                        </div>
-                                        <pre class="text-xs text-gray-300 bg-gray-900 p-2 rounded overflow-x-auto" x-text="testResults?.code"></pre>
-                                    </div>
-                                    
-                                    <div x-show="testResults?.explanation" class="bg-gray-800 rounded p-3">
-                                        <div class="text-sm font-medium text-blue-400 mb-2">Test Explanation</div>
-                                        <div class="text-xs text-gray-300" x-text="testResults.explanation"></div>
-                                    </div>
-                                </div>
-
-                                <div x-show="!testResults && !testLoading && selectedFile" 
-                                     class="empty-state text-center py-8 text-gray-500">
-                                    <i class="fas fa-vial text-3xl mb-2"></i>
-                                    <p>Configure and generate tests for this file</p>
+                    </div>
+                    
+                    <div class="prs-list">
+                        <template x-for="pr in pullRequests" :key="pr.id">
+                            <div class="pr-item">
+                                <div class="pr-title" x-text="pr.title"></div>
+                                <div class="pr-meta">
+                                    <span class="pr-author" x-text="pr.author.name"></span>
+                                    <span class="pr-status" :class="'status-' + pr.state" x-text="pr.state"></span>
                                 </div>
                             </div>
-                        </div>
-
-                        <!-- Optimize Tab -->
-                        <div x-show="assistantTab === 'optimize'" class="tab-content">
-                            <div class="p-4">
-                                <div class="flex items-center justify-between mb-4">
-                                    <h4 class="font-medium text-white">Code Optimization</h4>
-                                    <button @click="startFileOptimization()" 
-                                            :disabled="!selectedFile || optimizeLoading"
-                                            class="action-button btn-primary text-sm">
-                                        <i :class="optimizeLoading ? 'fas fa-spinner fa-spin' : 'fas fa-rocket'" class="mr-1"></i>
-                                        <span x-text="optimizeLoading ? 'Optimizing...' : 'Optimize'"></span>
-                                    </button>
-                                </div>
-
-                                <!-- Optimization Results -->
-                                <div x-show="optimizationResults.length > 0" class="optimization-results space-y-3">
-                                    <template x-for="result in optimizationResults" :key="result.id">
-                                        <div class="optimization-item p-3 bg-gray-800 rounded border border-gray-600">
-                                            <div class="flex items-center justify-between mb-2">
-                                                <div class="flex items-center space-x-2">
-                                                    <i class="fas fa-rocket text-green-400"></i>
-                                                    <span class="font-medium text-sm text-white" x-text="result.title"></span>
-                                                </div>
-                                                <div class="flex items-center space-x-2">
-                                                    <span class="text-xs text-green-400" x-text="result.impact"></span>
-                                                    <button @click="applyOptimization(result)" 
-                                                            class="action-button btn-sm btn-primary">
-                                                        Apply
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <p class="text-sm text-gray-300 mb-2" x-text="result.description"></p>
-                                            <div x-show="result.before && result.after" class="diff-preview">
-                                                <div class="text-xs text-gray-400 mb-1">Preview:</div>
-                                                <div class="bg-gray-900 rounded p-2 text-xs font-mono">
-                                                    <div class="text-red-400 mb-1">- <span x-text="result.before"></span></div>
-                                                    <div class="text-green-400">+ <span x-text="result.after"></span></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-
-                                <div x-show="!optimizationResults.length && !optimizeLoading && selectedFile" 
-                                     class="empty-state text-center py-8 text-gray-500">
-                                    <i class="fas fa-rocket text-3xl mb-2"></i>
-                                    <p>Analyze this file for optimization opportunities</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Chat Tab -->
-                        <div x-show="assistantTab === 'chat'" class="tab-content">
-                            <div class="flex flex-col h-full">
-                                <!-- Chat Messages -->
-                                <div class="chat-messages flex-1 p-4 overflow-y-auto space-y-3">
-                                    <template x-for="message in chatMessages" :key="message.id">
-                                        <div :class="message.role === 'user' ? 'chat-message user' : 'chat-message assistant'">
-                                            <div class="message-content">
-                                                <div class="message-header">
-                                                    <i :class="message.role === 'user' ? 'fas fa-user text-blue-400' : 'fas fa-robot text-purple-400'"></i>
-                                                    <span class="text-xs text-gray-400" x-text="message.timestamp"></span>
-                                                </div>
-                                                <div class="message-text" x-text="message.content"></div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                    
-                                    <div x-show="chatMessages.length === 0" class="empty-state text-center py-8 text-gray-500">
-                                        <i class="fas fa-comments text-3xl mb-2"></i>
-                                        <p>Start a conversation about your code</p>
-                                    </div>
-                                </div>
-
-                                <!-- Chat Input -->
-                                <div class="chat-input-container p-4 border-t border-gray-600">
-                                    <div class="flex space-x-2">
-                                        <input type="text" 
-                                               x-model="chatInput"
-                                               @keydown.enter="sendChatMessage()"
-                                               placeholder="Ask about this file..."
-                                               class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-sm"
-                                               :disabled="chatLoading">
-                                        <button @click="sendChatMessage()" 
-                                                :disabled="!chatInput.trim() || chatLoading"
-                                                class="action-button btn-primary">
-                                            <i :class="chatLoading ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                        </template>
+                        <div x-show="pullRequests.length === 0" class="empty-state">
+                            <i class="fas fa-code-pull-request"></i>
+                            <p>No pull requests found</p>
                         </div>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Resize Handle -->
-            <div x-show="showBottomPanel" class="resize-handle" @mousedown="startResize($event)"></div>
+        <!-- Editor Area -->
+        <div class="editor-area">
+            <!-- Tab Bar -->
+            <div class="tab-bar">
+                <div x-show="selectedFile" class="editor-tab active">
+                    <i :class="getFileIcon(selectedFile)"></i>
+                    <span x-text="selectedFile?.name"></span>
+                    <span x-show="hasChanges" class="modified-dot"></span>
+                    <button class="tab-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div x-show="!selectedFile" class="no-tabs">
+                    No files open
+                </div>
+            </div>
 
-            <!-- Bottom Panel - AI Analysis -->
-            <div x-show="showBottomPanel" class="bottom-panel">
-                <!-- Bottom Panel Tabs -->
-                <div class="flex border-b border-gray-600 bg-gray-800 flex-shrink-0">
-                    <button @click="bottomTab = 'analysis'" 
-                            :class="{'bg-blue-600': bottomTab === 'analysis', 'bg-gray-700': bottomTab !== 'analysis'}"
-                            class="px-4 py-3 text-sm font-medium">
-                        <i class="fas fa-robot mr-2"></i>
-                        AI Analysis
-                        <span x-show="analysisResults.length" class="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full" x-text="analysisResults.length"></span>
+            <!-- Editor Content -->
+            <div class="editor-content">
+                <!-- Loading State -->
+                <div x-show="loading" class="editor-loading">
+                    <div class="loading-spinner"></div>
+                    <p x-text="loadingMessage">Loading...</p>
+                </div>
+                
+                <!-- Welcome Screen -->
+                <div x-show="!selectedFile && !loading" class="editor-welcome">
+                    <div class="welcome-content">
+                        <i class="fas fa-code"></i>
+                        <h3>Start exploring</h3>
+                        <p>Select a file from the explorer to begin</p>
+                        <div class="welcome-actions">
+                            <button class="welcome-btn" @click="createNewFile()">
+                                <i class="fas fa-file-plus"></i>
+                                New File
+                            </button>
+                            <button class="welcome-btn" @click="openFolder()">
+                                <i class="fas fa-folder-open"></i>
+                                Open Folder
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Monaco Editor -->
+                <div id="monaco-editor-container" x-show="selectedFile && !loading"></div>
+            </div>
+        </div>
+
+        <!-- AI Assistant Panel (Right Side - Cursor Style) -->
+        <div class="ai-assistant-panel" :class="{ 'expanded': showAIPanel }">
+            <div class="ai-panel-header">
+                <div class="ai-panel-title">
+                    <i class="fas fa-robot"></i>
+                    <span>AI Assistant</span>
+                </div>
+                <div class="ai-panel-controls">
+                    <button class="ai-control-btn" @click="showAIPanel = !showAIPanel">
+                        <i :class="showAIPanel ? 'fas fa-chevron-right' : 'fas fa-chevron-left'"></i>
                     </button>
-                    <button @click="bottomTab = 'suggestions'" 
-                            :class="{'bg-blue-600': bottomTab === 'suggestions', 'bg-gray-700': bottomTab !== 'suggestions'}"
-                            class="px-4 py-3 text-sm font-medium">
-                        <i class="fas fa-lightbulb mr-2"></i>
-                        Suggestions
-                        <span x-show="suggestions.length" class="ml-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full" x-text="suggestions.length"></span>
-                    </button>
-                    <button @click="bottomTab = 'tests'" 
-                            :class="{'bg-blue-600': bottomTab === 'tests', 'bg-gray-700': bottomTab !== 'tests'}"
-                            class="px-4 py-3 text-sm font-medium">
-                        <i class="fas fa-vial mr-2"></i>
-                        Generated Tests
-                        <span x-show="generatedTests && generatedTests.test_code" class="ml-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">1</span>
-                    </button>
-                    
-                    <!-- Close Button -->
-                    <div class="ml-auto flex items-center">
-                        <button @click="showBottomPanel = false" class="p-3 hover:bg-gray-600 text-gray-400 hover:text-white">
-                            <i class="fas fa-times"></i>
+                </div>
+            </div>
+
+            <div x-show="showAIPanel" class="ai-panel-content">
+                <!-- Model Selection -->
+                <div class="ai-model-selector">
+                    <select x-model="selectedModel" class="model-select">
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    </select>
+                </div>
+                
+                <!-- Mode Selection -->
+                <div class="ai-mode-selection">
+                    <div class="ai-mode-tabs">
+                        <button :class="{ 'active': assistantMode === 'code' }" 
+                                @click="assistantMode = 'code'"
+                                class="ai-mode-tab">
+                            <i class="fas fa-code"></i>
+                            <span>Code</span>
+                        </button>
+                        <button :class="{ 'active': assistantMode === 'test' }" 
+                                @click="assistantMode = 'test'"
+                                class="ai-mode-tab">
+                            <i class="fas fa-vial"></i>
+                            <span>Test</span>
+                        </button>
+                        <button :class="{ 'active': assistantMode === 'security' }" 
+                                @click="assistantMode = 'security'"
+                                class="ai-mode-tab">
+                            <i class="fas fa-shield-alt"></i>
+                            <span>Security</span>
                         </button>
                     </div>
                 </div>
 
-                <!-- Bottom Panel Content -->
-                <div class="bottom-panel-content">
-                    <!-- Analysis Results -->
-                    <div x-show="bottomTab === 'analysis'" class="p-4">
-                        <template x-for="result in analysisResults" :key="result.id">
-                            <div :class="'ai-analysis-card severity-' + result.severity">
-                                <div class="p-4">
-                                    <div class="flex items-start justify-between mb-3">
-                                        <div class="flex items-center space-x-2">
-                                            <i :class="getSeverityIcon(result.severity)" class="text-lg"></i>
-                                            <h4 class="font-medium" x-text="result.title"></h4>
-                                            <span :class="getSeverityBadge(result.severity)" 
-                                                  class="px-2 py-1 text-xs rounded-full" 
-                                                  x-text="result.severity.toUpperCase()"></span>
-                                        </div>
-                                        <div class="flex space-x-2">
-                                            <button @click="viewDiff(result)" 
-                                                    x-show="result.suggestedFix && result.oldContent"
-                                                    class="action-button btn-secondary text-xs">
-                                                <i class="fas fa-eye"></i>
-                                                View Diff
-                                            </button>
-                                            <button @click="applyFix(result)" 
-                                                    x-show="result.suggestedFix"
-                                                    class="action-button btn-primary text-xs">
-                                                <i class="fas fa-magic"></i>
-                                                Apply Fix
-                                            </button>
-                                        </div>
+                <!-- Chat Interface -->
+                <div class="ai-chat-container">
+                    <!-- Chat Messages -->
+                    <div class="ai-chat-messages">
+                        <template x-for="message in chatMessages" :key="message.id">
+                            <div class="ai-chat-message" :class="message.role">
+                                <div class="ai-message-header">
+                                    <div class="ai-message-avatar">
+                                        <i :class="message.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
                                     </div>
-                                    
-                                    <p class="text-gray-300 mb-3" x-text="result.description"></p>
-                                    
-                                    <!-- Line Number Info -->
-                                    <div x-show="result.lineNumber" class="text-xs text-gray-400 mb-3 flex items-center">
-                                        <i class="fas fa-map-marker-alt mr-1"></i>
-                                        <span>Line </span>
-                                        <span x-text="result.lineNumber"></span>
-                                        <span class="ml-2 text-gray-500">•</span>
-                                        <span class="ml-2" x-text="result.category || 'Code Quality'"></span>
-                                    </div>
-                                    
-                                    <!-- Code Diff Viewer -->
-                                    <div x-show="result.showDiff" class="mb-4">
-                                        <div class="bg-gray-900 rounded-lg overflow-hidden border border-gray-600">
-                                            <!-- Diff Header -->
-                                            <div class="bg-gray-800 px-4 py-2 border-b border-gray-600 flex items-center justify-between">
-                                                <span class="text-sm font-medium text-gray-300">Code Changes</span>
-                                                <button @click="result.showDiff = false" class="text-gray-400 hover:text-white">
-                                                    <i class="fas fa-times"></i>
-                                                </button>
-                                            </div>
-                                            
-                                            <!-- Before Code -->
-                                            <div x-show="result.oldContent" class="border-b border-gray-600">
-                                                <div class="bg-red-900 bg-opacity-20 px-4 py-2 border-b border-red-800">
-                                                    <span class="text-red-400 text-sm font-medium">
-                                                        <i class="fas fa-minus mr-2"></i>Before
-                                                    </span>
-                                                </div>
-                                                <pre class="p-4 text-sm font-mono text-red-200 bg-red-900 bg-opacity-10 overflow-x-auto" x-text="result.oldContent"></pre>
-                                            </div>
-                                            
-                                            <!-- After Code -->
-                                            <div x-show="result.suggestedFix">
-                                                <div class="bg-green-900 bg-opacity-20 px-4 py-2 border-b border-green-800">
-                                                    <span class="text-green-400 text-sm font-medium">
-                                                        <i class="fas fa-plus mr-2"></i>After (Suggested Fix)
-                                                    </span>
-                                                </div>
-                                                <pre class="p-4 text-sm font-mono text-green-200 bg-green-900 bg-opacity-10 overflow-x-auto" x-text="result.suggestedFix"></pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Recommendation -->
-                                    <div x-show="result.recommendation" class="bg-blue-900 bg-opacity-20 border border-blue-800 rounded p-3 text-sm">
-                                        <div class="flex items-start space-x-2">
-                                            <i class="fas fa-lightbulb text-blue-400 mt-0.5"></i>
-                                            <div>
-                                                <div class="font-medium text-blue-300 mb-1">Recommendation</div>
-                                                <div class="text-blue-200" x-text="result.recommendation"></div>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <span class="ai-message-author" x-text="message.role === 'user' ? 'You' : 'Assistant'"></span>
+                                    <span class="ai-message-time" x-text="formatTimestamp(message.timestamp)"></span>
+                                </div>
+                                <div class="ai-message-content" x-html="formatMessage(message.content)"></div>
+                                
+                                <!-- Action Buttons -->
+                                <div x-show="message.role === 'assistant' && message.actions" class="ai-message-actions">
+                                    <template x-for="action in message.actions" :key="action.id">
+                                        <button @click="executeAction(action)" 
+                                                class="ai-action-btn"
+                                                :class="'action-' + action.type">
+                                            <i :class="action.icon"></i>
+                                            <span x-text="action.label"></span>
+                                        </button>
+                                    </template>
                                 </div>
                             </div>
                         </template>
                         
-                        <div x-show="analysisResults.length === 0" class="text-center py-8 text-gray-500">
-                            <i class="fas fa-robot text-4xl mb-3"></i>
-                            <p>No analysis results yet. Run AI analysis on a file to see results here.</p>
-                        </div>
-                    </div>
-
-                    <!-- Suggestions -->
-                    <div x-show="bottomTab === 'suggestions'" class="p-4">
-                        <!-- Suggestions content will go here -->
-                        <div class="text-center py-8 text-gray-500">
-                            <i class="fas fa-lightbulb text-4xl mb-3"></i>
-                            <p>AI suggestions will appear here when available.</p>
-                        </div>
-                    </div>
-
-                    <!-- Generated Tests -->
-                    <div x-show="bottomTab === 'tests'" class="p-4">
-                        <div x-show="generatedTests && generatedTests.test_code" class="space-y-4">
-                            <div class="bg-gray-800 rounded-lg p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <h4 class="font-medium text-green-400">
-                                        <i class="fas fa-vial mr-2"></i>
-                                        Generated Test Code
-                                    </h4>
-                                    <button @click="copyTestCode()" class="action-button btn-primary text-xs">
-                                        <i class="fas fa-copy"></i>
-                                        Copy Code
-                                    </button>
+                        <!-- Loading Message -->
+                        <div x-show="chatLoading" class="ai-chat-message assistant loading">
+                            <div class="ai-message-header">
+                                <div class="ai-message-avatar">
+                                    <div class="loading-spinner"></div>
                                 </div>
-                                <pre class="bg-gray-900 p-3 rounded text-sm font-mono overflow-x-auto text-green-300" x-text="generatedTests.test_code"></pre>
+                                <span class="ai-message-author">Assistant</span>
                             </div>
-                            
-                            <div x-show="generatedTests.explanation" class="bg-gray-800 rounded-lg p-4">
-                                <h4 class="font-medium text-blue-400 mb-2">
-                                    <i class="fas fa-info-circle mr-2"></i>
-                                    Test Explanation
-                                </h4>
-                                <p class="text-gray-300 text-sm" x-text="generatedTests.explanation"></p>
-                            </div>
-                            
-                            <div x-show="generatedTests.coverage_areas && generatedTests.coverage_areas.length" class="bg-gray-800 rounded-lg p-4">
-                                <h4 class="font-medium text-purple-400 mb-2">
-                                    <i class="fas fa-check-circle mr-2"></i>
-                                    Coverage Areas
-                                </h4>
-                                <ul class="list-disc list-inside text-gray-300 text-sm space-y-1">
-                                    <template x-for="area in generatedTests.coverage_areas" :key="area">
-                                        <li x-text="area"></li>
-                                    </template>
-                                </ul>
+                            <div class="ai-message-content">
+                                <span x-text="chatLoadingMessage">Thinking...</span>
                             </div>
                         </div>
                         
-                        <!-- Empty state -->
-                        <div x-show="!generatedTests || !generatedTests.test_code" class="text-center py-8 text-gray-500">
-                            <i class="fas fa-vial text-4xl mb-3"></i>
-                            <p>No tests generated yet. Click "Generate Tests" to create test cases for your code.</p>
+                        <!-- Welcome Message -->
+                        <div x-show="chatMessages.length === 0 && !chatLoading" class="ai-welcome-message">
+                            <div class="ai-welcome-icon">
+                                <i :class="getModeIcon()"></i>
+                            </div>
+                            <h4 x-text="getModeTitle()"></h4>
+                            <p x-text="getModeDescription()"></p>
+                            
+                            <!-- Quick Actions -->
+                            <div class="ai-quick-actions">
+                                <template x-for="suggestion in getQuickSuggestions()" :key="suggestion.text">
+                                    <button @click="sendQuickMessage(suggestion.text)" class="ai-quick-action">
+                                        <i :class="suggestion.icon"></i>
+                                        <span x-text="suggestion.text"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Chat Input -->
+                    <div class="ai-chat-input">
+                        <div class="ai-input-container">
+                            <textarea x-model="chatInput" 
+                                      @keydown.enter.meta.prevent="sendChatMessage()"
+                                      @keydown.enter.ctrl.prevent="sendChatMessage()"
+                                      @input="autoResizeTextarea($event)"
+                                      placeholder="Ask about your code..."
+                                      class="ai-chat-textarea"
+                                      rows="1"
+                                      :disabled="chatLoading"></textarea>
+                            <button @click="sendChatMessage()" 
+                                    :disabled="!chatInput.trim() || chatLoading"
+                                    class="ai-send-button">
+                                <i :class="chatLoading ? 'fas fa-spinner fa-spin' : 'fas fa-paper-plane'"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- Context Info -->
+                        <div x-show="selectedFile" class="ai-context-info">
+                            <div class="ai-context-file">
+                                <i :class="getFileIcon(selectedFile)"></i>
+                                <span x-text="selectedFile?.name"></span>
+                                <span x-show="hasChanges" class="ai-modified-indicator"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1113,281 +471,135 @@
         </div>
     </div>
 
-    <!-- Full Dependency Graph Modal -->
-    <div x-show="showGraphModal" 
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="opacity-0"
-         x-transition:enter-end="opacity-100"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100"
-         x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-50 overflow-hidden bg-black bg-opacity-75 flex items-center justify-center">
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status-left">
+            <div class="status-item">
+                <i class="fas fa-code-branch"></i>
+                <span x-text="currentBranch"></span>
+            </div>
+            <div x-show="selectedFile" class="status-item">
+                <span x-text="getFileLanguage(selectedFile)"></span>
+            </div>
+            <div x-show="selectedFile" class="status-item">
+                <span>UTF-8</span>
+            </div>
+        </div>
         
-        <div class="bg-gray-900 w-full h-full flex flex-col">
-            <!-- Graph Modal Header -->
-            <div class="bg-gray-800 px-6 py-4 border-b border-gray-700 flex items-center justify-between">
-                <div class="flex items-center space-x-4">
-                    <h2 class="text-xl font-bold text-white">
-                        <i class="fas fa-project-diagram mr-2 text-blue-400"></i>
-                        Dependency Graph
-                    </h2>
-                    <div class="text-sm text-gray-400" x-text="projectName"></div>
-                </div>
-                
-                <!-- Graph Controls -->
-                <div class="flex items-center space-x-4">
-                    <!-- Layout Controls -->
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-300">Layout:</label>
-                        <select x-model="graphLayout" @change="updateGraphLayout()" 
-                                class="bg-gray-700 text-white text-sm px-2 py-1 rounded border border-gray-600">
-                            <option value="force">Force Directed</option>
-                            <option value="hierarchical">Hierarchical</option>
-                            <option value="circular">Circular</option>
-                            <option value="grid">Grid</option>
-                        </select>
-                    </div>
-                    
-                    <!-- Filter Controls -->
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-300">Show:</label>
-                        <div class="flex space-x-1">
-                            <button @click="toggleGraphFilter('imports')" 
-                                    :class="{'bg-green-600': graphFilters.imports, 'bg-gray-600': !graphFilters.imports}"
-                                    class="px-2 py-1 text-xs text-white rounded">Imports</button>
-                            <button @click="toggleGraphFilter('functions')" 
-                                    :class="{'bg-blue-600': graphFilters.functions, 'bg-gray-600': !graphFilters.functions}"
-                                    class="px-2 py-1 text-xs text-white rounded">Functions</button>
-                            <button @click="toggleGraphFilter('classes')" 
-                                    :class="{'bg-purple-600': graphFilters.classes, 'bg-gray-600': !graphFilters.classes}"
-                                    class="px-2 py-1 text-xs text-white rounded">Classes</button>
+        <div class="status-right">
+            <div x-show="hasChanges" class="status-item">
+                <i class="fas fa-circle"></i>
+                <span>Unsaved changes</span>
+            </div>
+            <div class="status-item">
+                <span x-text="files.length + ' files'"></span>
+            </div>
+            <button class="status-item ai-toggle" @click="showAIPanel = !showAIPanel">
+                <i class="fas fa-robot"></i>
+                <span x-text="selectedModel"></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Analysis Panel (slides up from bottom) -->
+    <div x-show="showBottomPanel" class="analysis-panel" :class="{ 'expanded': showBottomPanel }">
+        <div class="panel-header">
+            <div class="panel-tabs">
+                <button :class="{ 'active': bottomTab === 'analysis' }" 
+                        @click="bottomTab = 'analysis'"
+                        class="panel-tab">
+                    <i class="fas fa-search"></i>
+                    Analysis
+                    <span x-show="analysisResults.length" class="tab-badge" x-text="analysisResults.length"></span>
+                </button>
+                <button :class="{ 'active': bottomTab === 'suggestions' }" 
+                        @click="bottomTab = 'suggestions'"
+                        class="panel-tab">
+                    <i class="fas fa-lightbulb"></i>
+                    Suggestions
+                    <span x-show="suggestions.length" class="tab-badge" x-text="suggestions.length"></span>
+                </button>
+                <button :class="{ 'active': bottomTab === 'tests' }" 
+                        @click="bottomTab = 'tests'"
+                        class="panel-tab">
+                    <i class="fas fa-vial"></i>
+                    Tests
+                </button>
+            </div>
+            <button @click="showBottomPanel = false" class="panel-close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="panel-content">
+            <!-- Analysis Results -->
+            <div x-show="bottomTab === 'analysis'" class="analysis-results">
+                <template x-for="result in analysisResults" :key="result.id">
+                    <div class="analysis-item" :class="'severity-' + result.severity">
+                        <div class="item-header">
+                            <div class="item-icon">
+                                <i :class="getSeverityIcon(result.severity)"></i>
+                            </div>
+                            <div class="item-content">
+                                <h4 x-text="result.title"></h4>
+                                <p x-text="result.description"></p>
+                            </div>
+                            <div class="item-actions">
+                                <button x-show="result.suggestedFix" @click="applyFix(result)" class="fix-btn">
+                                    <i class="fas fa-magic"></i>
+                                    Fix
+                                </button>
+                            </div>
+                        </div>
+                        <div x-show="result.lineNumber" class="item-location">
+                            <i class="fas fa-map-marker-alt"></i>
+                            Line <span x-text="result.lineNumber"></span>
                         </div>
                     </div>
-                    
-                    <!-- Close Button -->
-                    <button @click="showGraphModal = false" 
-                            class="text-gray-400 hover:text-white p-2 rounded hover:bg-gray-700">
-                        <i class="fas fa-times text-lg"></i>
-                    </button>
-                </div>
+                </template>
             </div>
             
-            <!-- Graph Content -->
-            <div class="flex-1 flex">
-                <!-- Main Graph Area -->
-                <div class="flex-1 relative">
-                    <div id="dependency-graph-full" class="w-full h-full"></div>
-                    
-                    <!-- Graph Loading -->
-                    <div x-show="loadingFullGraph" 
-                         class="absolute inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center">
-                        <div class="text-center text-white">
-                            <i class="fas fa-spinner fa-spin text-4xl mb-4"></i>
-                            <p class="text-lg">Building dependency graph...</p>
-                            <p class="text-sm text-gray-400 mt-2">Analyzing file relationships</p>
+            <!-- Suggestions -->
+            <div x-show="bottomTab === 'suggestions'" class="suggestions-list">
+                <template x-for="suggestion in suggestions" :key="suggestion.id">
+                    <div class="suggestion-item">
+                        <div class="suggestion-content">
+                            <h4 x-text="suggestion.title"></h4>
+                            <p x-text="suggestion.description"></p>
                         </div>
+                        <button @click="applySuggestion(suggestion)" class="apply-btn">
+                            Apply
+                        </button>
                     </div>
-                </div>
-                
-                <!-- Graph Information Panel -->
-                <div class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col">
-                    <!-- Selected Node Info -->
-                    <div class="p-4 border-b border-gray-700">
-                        <h3 class="font-medium text-white mb-2">
-                            <i class="fas fa-info-circle mr-2"></i>
-                            Node Information
-                        </h3>
-                        
-                        <div x-show="selectedNode" class="space-y-2">
-                            <div class="text-sm">
-                                <span class="text-gray-400">File:</span>
-                                <span class="text-white font-mono text-xs" x-text="selectedNode?.name"></span>
-                            </div>
-                            <div class="text-sm">
-                                <span class="text-gray-400">Type:</span>
-                                <span class="text-blue-400" x-text="selectedNode?.type"></span>
-                            </div>
-                            <div class="text-sm">
-                                <span class="text-gray-400">Connections:</span>
-                                <span class="text-green-400" x-text="selectedNode?.connections"></span>
-                            </div>
-                            <div class="text-sm">
-                                <span class="text-gray-400">Dependencies:</span>
-                                <span class="text-yellow-400" x-text="selectedNode?.dependencies?.length || 0"></span>
-                            </div>
-                        </div>
-                        
-                        <div x-show="!selectedNode" class="text-sm text-gray-400">
-                            Click on a node to see details
-                        </div>
-                    </div>
-                    
-                    <!-- Connected Files -->
-                    <div class="p-4 border-b border-gray-700">
-                        <h3 class="font-medium text-white mb-2">
-                            <i class="fas fa-link mr-2"></i>
-                            Connected Files
-                        </h3>
-                        
-                        <div x-show="selectedNode && selectedNode.connections > 0" 
-                             class="space-y-1 max-h-40 overflow-y-auto">
-                            <template x-for="connection in getNodeConnections(selectedNode)" :key="connection.id">
-                                <div class="flex items-center justify-between text-xs py-1 px-2 bg-gray-700 rounded">
-                                    <span class="truncate flex-1 text-gray-300" x-text="connection.name"></span>
-                                    <span :class="getConnectionTypeColor(connection.type)" x-text="connection.type"></span>
-                                </div>
-                            </template>
-                        </div>
-                        
-                        <div x-show="!selectedNode || selectedNode.connections === 0" 
-                             class="text-sm text-gray-400">
-                            No connections
-                        </div>
-                    </div>
-                    
-                    <!-- Graph Statistics -->
-                    <div class="p-4 flex-1">
-                        <h3 class="font-medium text-white mb-2">
-                            <i class="fas fa-chart-bar mr-2"></i>
-                            Graph Statistics
-                        </h3>
-                        
-                        <div class="space-y-2 text-sm">
-                            <div class="flex justify-between">
-                                <span class="text-gray-400">Total Files:</span>
-                                <span class="text-blue-400" x-text="dependencyGraph?.nodes?.length || 0"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-400">Connections:</span>
-                                <span class="text-green-400" x-text="dependencyGraph?.edges?.length || 0"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-400">Avg. Connections:</span>
-                                <span class="text-yellow-400" x-text="getAverageConnections()"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-400">Max Connections:</span>
-                                <span class="text-red-400" x-text="getMaxConnections()"></span>
-                            </div>
-                        </div>
-                        
-                        <!-- Graph Actions -->
-                        <div class="mt-4 space-y-2">
-                            <button @click="exportGraph()" 
-                                    class="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
-                                <i class="fas fa-download mr-2"></i>
-                                Export Graph
-                            </button>
-                            <button @click="centerGraph()" 
-                                    class="w-full bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded text-sm">
-                                <i class="fas fa-crosshairs mr-2"></i>
-                                Center View
-                            </button>
-                            <button @click="refreshDependencyCache()" 
-                                    class="w-full bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-sm">
-                                <i class="fas fa-refresh mr-2"></i>
-                                Refresh Cache
-                            </button>
-                        </div>
-                    </div>
+                </template>
+            </div>
+            
+            <!-- Tests -->
+            <div x-show="bottomTab === 'tests'" class="test-results">
+                <div x-show="generatedTests" class="test-code">
+                    <pre x-text="generatedTests?.test_code"></pre>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Library loading detection and fallback -->
-    <script>
-        // Global flag to track vis-network availability
-        window.visNetworkLoaded = false;
-        
-        // Function to check if vis-network is properly loaded
-        function checkVisNetwork() {
-            if (typeof vis !== 'undefined' && vis.Network && vis.DataSet) {
-                window.visNetworkLoaded = true;
-                console.log('✅ vis-network library loaded successfully');
-                console.log('Available vis objects:', Object.keys(vis));
-                
-                // Dispatch custom event when loaded
-                window.dispatchEvent(new CustomEvent('visNetworkReady'));
-                return true;
-            }
-            return false;
-        }
-        
-        // Check immediately
-        if (!checkVisNetwork()) {
-            // Wait for scripts to load
-            window.addEventListener('load', function() {
-                setTimeout(() => {
-                    if (!checkVisNetwork()) {
-                        console.error('❌ vis-network library failed to load');
-                        console.log('Will use fallback graph visualization');
-                        
-                        // Create a minimal vis polyfill for basic functionality
-                        window.vis = {
-                            DataSet: function(data) {
-                                this.data = data || [];
-                                this.get = () => this.data;
-                                this.add = (item) => this.data.push(item);
-                                this.update = (item) => console.log('DataSet update:', item);
-                                this.remove = (id) => console.log('DataSet remove:', id);
-                            },
-                            Network: function(container, data, options) {
-                                this.container = container;
-                                this.data = data;
-                                this.options = options;
-                                
-                                // Simple fallback rendering
-                                this.renderFallback();
-                                
-                                // Mock methods
-                                this.on = (event, callback) => console.log('Network event:', event);
-                                this.fit = () => console.log('Network fit');
-                                this.destroy = () => {
-                                    if (this.container) {
-                                        this.container.innerHTML = '';
-                                    }
-                                };
-                            }
-                        };
-                        
-                        // Add renderFallback method to Network prototype
-                        window.vis.Network.prototype.renderFallback = function() {
-                            if (!this.container) return;
-                            
-                            const nodeCount = this.data.nodes ? this.data.nodes.length || this.data.nodes.get().length : 0;
-                            const edgeCount = this.data.edges ? this.data.edges.length || this.data.edges.get().length : 0;
-                            
-                            this.container.innerHTML = `
-                                <div class="h-full flex items-center justify-center bg-gray-800 rounded-lg border border-gray-600">
-                                    <div class="text-center text-gray-300 p-8">
-                                        <i class="fas fa-project-diagram text-4xl mb-4 text-blue-400"></i>
-                                        <h3 class="text-lg font-medium mb-2">Dependency Graph</h3>
-                                        <div class="space-y-2 text-sm">
-                                            <div class="flex justify-center space-x-6">
-                                                <div class="text-center">
-                                                    <div class="text-xl font-bold text-blue-400">${nodeCount}</div>
-                                                    <div class="text-xs text-gray-400">Files</div>
-                                                </div>
-                                                <div class="text-center">
-                                                    <div class="text-xl font-bold text-green-400">${edgeCount}</div>
-                                                    <div class="text-xs text-gray-400">Connections</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <p class="text-xs text-gray-500 mt-4">Interactive graph visualization unavailable</p>
-                                        <p class="text-xs text-gray-500">Using fallback display</p>
-                                    </div>
-                                </div>
-                            `;
-                        };
-                        
-                        window.visNetworkLoaded = 'fallback';
-                        window.dispatchEvent(new CustomEvent('visNetworkReady'));
-                    }
-                }, 1000);
-            });
-        }
-    </script>
+    <!-- Graph Modal -->
+    <div x-show="showGraphModal" class="graph-modal" @click="showGraphModal = false">
+        <div class="graph-modal-content" @click.stop>
+            <div class="graph-modal-header">
+                <h3>Dependency Graph</h3>
+                <button @click="showGraphModal = false" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="graph-modal-body">
+                <div id="dependency-graph-full" class="h-full"></div>
+                <div x-show="loadingFullGraph" class="graph-modal-loading">
+                    <div class="loading-spinner"></div>
+                    <span>Loading full graph...</span>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html> 

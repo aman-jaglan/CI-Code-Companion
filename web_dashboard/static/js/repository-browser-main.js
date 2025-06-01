@@ -30,6 +30,8 @@ function repositoryBrowser() {
         activeTab: 'files',
         bottomTab: 'analysis',
         showBottomPanel: false,
+        showAIPanel: false,  // AI panel state
+        showGraphModal: false,  // Graph modal state
         prFilter: 'all',
         analysisType: null,
         analysisStep: 1,
@@ -76,7 +78,6 @@ function repositoryBrowser() {
         dependencyCache: new Map(),
         loadingGraph: false,
         loadingFullGraph: false,
-        showGraphModal: false,
         selectedNode: null,
         graphLayout: 'force',
         graphFilter: 'all',
@@ -90,17 +91,21 @@ function repositoryBrowser() {
         miniGraphInstance: null,
         fullGraphInstance: null,
         
-        // NEW: AI Assistant System
-        assistantTab: 'review',
-        detectedTech: null,
+        // NEW: Cursor-style AI Assistant System
+        assistantMode: 'code', // code, test, security
+        selectedModel: 'gemini-2.5-pro',
         
-        // Review functionality
-        reviewLoading: false,
-        reviewResults: [],
+        // Chat functionality
+        chatLoading: false,
+        chatLoadingMessage: 'Thinking...',
+        chatMessages: [],
+        chatInput: '',
         
-        // Test functionality
-        testLoading: false,
-        testResults: null,
+        // File selections for different modes
+        selectedTestFiles: [],
+        selectedSecurityFiles: [],
+        
+        // Configuration objects
         testConfig: {
             type: 'unit',
             coverageFocus: {
@@ -110,54 +115,33 @@ function repositoryBrowser() {
             }
         },
         
-        // Optimization functionality
+        securityConfig: {
+            vulnerabilities: true,
+            dependencies: false,
+            codePatterns: true,
+            compliance: false
+        },
+        
+        // Legacy properties to maintain compatibility
+        detectedTech: null,
+        reviewLoading: false,
+        reviewResults: [],
+        testLoading: false,
+        testResults: null,
         optimizeLoading: false,
         optimizationResults: [],
-        
-        // Chat functionality
-        chatLoading: false,
-        chatMessages: [],
-        chatInput: '',
-        
-        // Multi-technology AI agents
-        availableAgents: {
-            'frontend-react': {
-                name: 'React/Frontend Expert',
-                technologies: ['jsx', 'tsx', 'javascript', 'typescript', 'css', 'scss', 'html'],
-                specialties: ['component-architecture', 'hooks', 'state-management', 'performance', 'accessibility']
-            },
-            'backend-python': {
-                name: 'Python Backend Expert', 
-                technologies: ['python'],
-                specialties: ['django', 'flask', 'fastapi', 'async', 'testing', 'database', 'security']
-            },
-            'backend-node': {
-                name: 'Node.js Backend Expert',
-                technologies: ['javascript', 'typescript'],
-                specialties: ['express', 'nestjs', 'graphql', 'microservices', 'performance', 'security']
-            },
-            'database': {
-                name: 'Database Expert',
-                technologies: ['sql', 'json', 'yaml'],
-                specialties: ['query-optimization', 'schema-design', 'indexing', 'migrations', 'performance']
-            },
-            'devops': {
-                name: 'DevOps Expert',
-                technologies: ['dockerfile', 'yaml', 'json', 'shell', 'bash'],
-                specialties: ['docker', 'kubernetes', 'ci-cd', 'infrastructure', 'monitoring', 'security']
-            },
-            'mobile': {
-                name: 'Mobile Expert',
-                technologies: ['jsx', 'tsx', 'dart', 'swift', 'kotlin'],
-                specialties: ['react-native', 'flutter', 'native-modules', 'performance', 'deployment']
-            }
-        },
         
         init() {
             console.log('=== Repository Browser Initializing ===');
             try {
                 this.initFromURL();
                 this.loadProject();
+                
+                // Initialize horizontal sidebar tabs
+                this.initializeSidebarTabs();
+                
+                // Initialize AI Assistant with welcome message
+                this.addWelcomeMessage();
                 
                 // Add window resize handler for Monaco editor
                 this.setupWindowResizeHandler();
@@ -252,6 +236,16 @@ function repositoryBrowser() {
             }
         },
 
+        // Update file tree display after changes
+        updateFileTreeDisplay() {
+            this.filteredFiles = this.globalSearch ? 
+                this.fileTree.filter(item => 
+                    item.name.toLowerCase().includes(this.globalSearch.toLowerCase()) ||
+                    item.path.toLowerCase().includes(this.globalSearch.toLowerCase())
+                ) : 
+                this.fileTree;
+        },
+
         // UI Helpers
         async switchBranch() {
             await this.loadFileTree();
@@ -276,16 +270,19 @@ function repositoryBrowser() {
 
         // Global search functionality
         performGlobalSearch() {
-            if (!this.globalSearch.trim()) {
-                this.filteredFiles = this.fileTree;
-                return;
+            this.updateFileTreeDisplay();
+        },
+
+        // File handling
+        async handleFileItemClick(item, event) {
+            if (item.type === 'tree') {
+                item.expanded = !item.expanded;
+                if (item.expanded && !item.children) {
+                    await this.loadFileTree(item.path);
+                }
+            } else {
+                await this.selectFile(item);
             }
-            
-            const searchTerm = this.globalSearch.toLowerCase();
-            this.filteredFiles = this.fileTree.filter(item => 
-                item.name.toLowerCase().includes(searchTerm) ||
-                item.path.toLowerCase().includes(searchTerm)
-            );
         },
 
         // Mock data loaders (implement these based on your backend)
@@ -293,90 +290,32 @@ function repositoryBrowser() {
             try {
                 const response = await fetch(`/gitlab/repository/${this.projectId}/commits?branch=${this.currentBranch}&per_page=20`);
                 const data = await response.json();
-                this.commits = data.commits;
+                this.commits = data.commits || [];
             } catch (error) {
                 console.error('Error loading commits:', error);
+                this.commits = [];
             }
         },
 
         async loadPullRequests() {
-            // Mock implementation for now
-            this.pullRequests = [];
-        },
-
-        // AI Analysis function (simplified for now)
-        async analyzeCode(type) {
-            console.log('Starting AI analysis:', type);
-            this.showNotification('info', `${type} analysis feature coming soon!`);
-        },
-
-        async commitChanges() {
-            if (!this.selectedFile || !this.monacoEditor || !this.hasChanges) return;
-            
-            const newContent = this.monacoEditor.getValue();
-            const commitMessage = prompt('Enter commit message:', `Update ${this.selectedFile.name}`);
-            
-            if (!commitMessage) return;
-            
             try {
-                this.loading = true;
-                this.loadingMessage = 'Committing changes...';
-                
-                const response = await fetch(`/gitlab/repository/${this.projectId}/commit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: this.selectedFile.path,
-                        branch: this.currentBranch,
-                        content: newContent,
-                        commit_message: commitMessage
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    this.hasChanges = false;
-                    this.selectedFile.content = newContent;
-                    this.showNotification('success', 'Changes committed successfully!');
-                    await this.loadCommits(); // Refresh commits
-                } else {
-                    this.showNotification('error', 'Error committing changes: ' + result.error);
-                }
-                
-                this.loading = false;
-                
+                const response = await fetch(`/gitlab/repository/${this.projectId}/merge_requests?state=opened`);
+                const data = await response.json();
+                this.pullRequests = data.merge_requests || [];
             } catch (error) {
-                console.error('Error committing changes:', error);
-                this.showNotification('error', 'Error committing changes: ' + error.message);
-                this.loading = false;
+                console.error('Error loading pull requests:', error);
+                this.pullRequests = [];
             }
         },
 
-        navigateToPath(path) {
-            this.loadFileTree(path);
-        },
-
         // File status helpers
-        getFileStatus(item) {
-            if (item.hasIssues) return '!';
-            if (item.isModified) return 'M';
-            if (item.isNew) return '+';
-            if (this.selectedFile?.path === item.path) return '●';
-            return '';
-        },
-        
-        getFileStatusClass(item) {
-            if (item.hasIssues) return 'status-issues';
-            if (item.isModified) return 'status-modified';
-            if (item.isNew) return 'status-new';
-            if (this.selectedFile?.path === item.path) return 'status-selected';
-            return '';
+        getModifiedFiles() {
+            return this.fileTree.filter(file => file.isModified || file.hasChanges) || [];
         },
         
         // File icon helpers
         getFileIcon(item) {
-            if (item.type === 'tree') return 'fas fa-folder text-blue-400';
+            if (item.type === 'tree') return item.expanded ? 'fas fa-folder-open' : 'fas fa-folder';
             
             if (!item.name) return 'fas fa-file text-gray-400';
             
@@ -415,31 +354,7 @@ function repositoryBrowser() {
                 'md': 'fab fa-markdown text-gray-400',
                 'txt': 'fas fa-file-alt text-gray-400',
                 'sql': 'fas fa-database text-blue-400',
-                'sh': 'fas fa-terminal text-green-400',
-                'bash': 'fas fa-terminal text-green-400',
-                'dockerfile': 'fab fa-docker text-blue-500',
-                'tf': 'fas fa-cloud text-purple-500',
-                'java': 'fab fa-java text-orange-500',
-                'php': 'fab fa-php text-purple-500',
-                'rb': 'fas fa-gem text-red-500',
-                'go': 'fab fa-golang text-blue-400',
-                'rs': 'fas fa-box text-orange-500',
-                'swift': 'fab fa-swift text-orange-500',
-                'kt': 'fas fa-code text-purple-500',
-                'cs': 'fas fa-code text-purple-500',
-                'cpp': 'fas fa-code text-blue-500',
-                'c': 'fas fa-code text-blue-500',
-                'h': 'fas fa-code text-blue-500',
-                'vue': 'fab fa-vuejs text-green-500',
-                'dart': 'fas fa-mobile-alt text-blue-400',
-                'xml': 'fas fa-code text-orange-400',
-                'svg': 'fas fa-vector-square text-green-400',
-                'toml': 'fas fa-cog text-orange-400',
-                'ini': 'fas fa-cog text-gray-400',
-                'cfg': 'fas fa-cog text-gray-400',
-                'conf': 'fas fa-cog text-gray-400',
-                'log': 'fas fa-list text-gray-400',
-                'lock': 'fas fa-lock text-yellow-500'
+                'sh': 'fas fa-terminal text-green-400'
             };
             
             return iconMap[ext] || 'fas fa-file text-gray-400';
@@ -449,29 +364,6 @@ function repositoryBrowser() {
             if (!file || !file.name) return 'Text';
             
             const ext = file.name.split('.').pop()?.toLowerCase();
-            const filename = file.name.toLowerCase();
-            
-            // Handle special filenames
-            const specialFileLanguages = {
-                'dockerfile': 'Docker',
-                'docker-compose.yml': 'Docker Compose',
-                'makefile': 'Makefile',
-                'package.json': 'Package Config',
-                'composer.json': 'Composer Config',
-                'gemfile': 'Ruby Gems',
-                'requirements.txt': 'Python Requirements',
-                'pipfile': 'Python Pipfile',
-                'setup.py': 'Python Setup',
-                'cargo.toml': 'Rust Cargo',
-                'go.mod': 'Go Module',
-                '.gitignore': 'Git Ignore',
-                '.env': 'Environment'
-            };
-            
-            if (specialFileLanguages[filename]) {
-                return specialFileLanguages[filename];
-            }
-            
             const langMap = {
                 'py': 'Python',
                 'js': 'JavaScript',
@@ -480,45 +372,405 @@ function repositoryBrowser() {
                 'tsx': 'React TSX',
                 'html': 'HTML',
                 'css': 'CSS',
-                'scss': 'Sass (SCSS)',
-                'sass': 'Sass',
-                'less': 'Less CSS',
                 'json': 'JSON',
                 'yaml': 'YAML',
                 'yml': 'YAML',
-                'toml': 'TOML',
-                'ini': 'INI Config',
-                'xml': 'XML',
-                'svg': 'SVG',
                 'md': 'Markdown',
                 'txt': 'Plain Text',
-                'sql': 'SQL',
-                'sh': 'Shell Script',
-                'bash': 'Bash Script',
-                'dockerfile': 'Docker',
-                'tf': 'Terraform',
-                'java': 'Java',
-                'php': 'PHP',
-                'rb': 'Ruby',
-                'go': 'Go',
-                'rs': 'Rust',
-                'swift': 'Swift',
-                'kt': 'Kotlin',
-                'cs': 'C#',
-                'cpp': 'C++',
-                'c': 'C',
-                'h': 'C Header',
-                'vue': 'Vue.js',
-                'dart': 'Dart',
-                'log': 'Log File',
-                'lock': 'Lock File'
+                'sql': 'SQL'
             };
             
             return langMap[ext] || 'Text';
         },
 
-        // === DEPENDENCY GRAPH SYSTEM ===
+        // AI Assistant methods
+        addWelcomeMessage() {
+            const welcomeMessage = {
+                id: Date.now(),
+                role: 'assistant',
+                content: this.getModeWelcomeMessage(),
+                timestamp: new Date(),
+                actions: this.getModeActions()
+            };
+            this.chatMessages = [welcomeMessage];
+        },
         
+        getModeWelcomeMessage() {
+            switch (this.assistantMode) {
+                case 'code':
+                    return `Hello! I'm your **Code Development Assistant** powered by ${this.selectedModel}. I can help you with:
+- Code review and analysis
+- Best practices and optimization
+- Bug detection and fixes
+- Architecture suggestions
+- Framework-specific guidance
+
+Select a file or ask me anything about your code!`;
+                    
+                case 'test':
+                    return `Hello! I'm your **Testing Assistant** powered by ${this.selectedModel}. I can help you with:
+- Generate comprehensive test suites
+- Test strategy recommendations
+- Coverage analysis
+- Mock and fixture creation
+- Performance testing
+
+Select files to test or ask about testing strategies!`;
+                    
+                case 'security':
+                    return `Hello! I'm your **Security Analysis Assistant** powered by ${this.selectedModel}. I can help you with:
+- Vulnerability scanning
+- Dependency security analysis
+- Code pattern security review
+- Compliance checking
+- Security best practices
+
+Configure your security scope or ask about security concerns!`;
+                    
+                default:
+                    return 'Hello! How can I help you today?';
+            }
+        },
+        
+        getModeActions() {
+            switch (this.assistantMode) {
+                case 'code':
+                    return [
+                        { id: 'review-file', type: 'primary', icon: 'fas fa-search-code', label: 'Review Current File' },
+                        { id: 'explain-code', type: 'secondary', icon: 'fas fa-question-circle', label: 'Explain Code' }
+                    ];
+                case 'test':
+                    return [
+                        { id: 'generate-tests', type: 'primary', icon: 'fas fa-vial', label: 'Generate Tests' },
+                        { id: 'test-strategy', type: 'secondary', icon: 'fas fa-lightbulb', label: 'Test Strategy' }
+                    ];
+                case 'security':
+                    return [
+                        { id: 'scan-vulnerabilities', type: 'primary', icon: 'fas fa-shield-alt', label: 'Scan Vulnerabilities' },
+                        { id: 'check-dependencies', type: 'secondary', icon: 'fas fa-cube', label: 'Check Dependencies' }
+                    ];
+                default:
+                    return [];
+            }
+        },
+        
+        getModeIcon() {
+            switch (this.assistantMode) {
+                case 'code': return 'fas fa-code';
+                case 'test': return 'fas fa-vial';
+                case 'security': return 'fas fa-shield-alt';
+                default: return 'fas fa-robot';
+            }
+        },
+        
+        getModeTitle() {
+            switch (this.assistantMode) {
+                case 'code': return 'Code Development';
+                case 'test': return 'Testing & QA';
+                case 'security': return 'Security Analysis';
+                default: return 'AI Assistant';
+            }
+        },
+        
+        getModeDescription() {
+            switch (this.assistantMode) {
+                case 'code': return 'Get code reviews, optimizations, and development guidance';
+                case 'test': return 'Generate tests, analyze coverage, and improve quality';
+                case 'security': return 'Scan for vulnerabilities and security best practices';
+                default: return 'How can I help you today?';
+            }
+        },
+        
+        getQuickSuggestions() {
+            switch (this.assistantMode) {
+                case 'code':
+                    return [
+                        { icon: 'fas fa-search-code', text: 'Review the current file for issues' },
+                        { icon: 'fas fa-rocket', text: 'Suggest performance optimizations' },
+                        { icon: 'fas fa-lightbulb', text: 'Explain how this code works' },
+                        { icon: 'fas fa-bug', text: 'Find potential bugs' }
+                    ];
+                case 'test':
+                    return [
+                        { icon: 'fas fa-vial', text: 'Generate unit tests for selected files' },
+                        { icon: 'fas fa-chart-bar', text: 'Analyze test coverage' },
+                        { icon: 'fas fa-stopwatch', text: 'Create performance tests' },
+                        { icon: 'fas fa-puzzle-piece', text: 'Generate integration tests' }
+                    ];
+                case 'security':
+                    return [
+                        { icon: 'fas fa-shield-alt', text: 'Scan for security vulnerabilities' },
+                        { icon: 'fas fa-cube', text: 'Check dependency security' },
+                        { icon: 'fas fa-lock', text: 'Review authentication patterns' },
+                        { icon: 'fas fa-key', text: 'Analyze encryption usage' }
+                    ];
+                default:
+                    return [];
+            }
+        },
+
+        // Chat functionality
+        async sendChatMessage() {
+            if (!this.chatInput.trim() || this.chatLoading) return;
+            
+            const userMessage = {
+                id: Date.now(),
+                role: 'user',
+                content: this.chatInput.trim(),
+                timestamp: new Date()
+            };
+            
+            this.chatMessages.push(userMessage);
+            const inputText = this.chatInput.trim();
+            this.chatInput = '';
+            
+            // Scroll to bottom
+            this.$nextTick(() => {
+                const chatContainer = document.querySelector('.ai-chat-messages');
+                if (chatContainer) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            });
+            
+            this.chatLoading = true;
+            this.chatLoadingMessage = this.getLoadingMessage();
+            
+            try {
+                let response;
+                switch (this.assistantMode) {
+                    case 'code':
+                        response = await this.sendCodeAnalysisRequest(inputText);
+                        break;
+                    case 'test':
+                        response = await this.sendTestGenerationRequest(inputText);
+                        break;
+                    case 'security':
+                        response = await this.sendSecurityAnalysisRequest(inputText);
+                        break;
+                    default:
+                        response = await this.sendGeneralChatRequest(inputText);
+                }
+                
+                const assistantMessage = {
+                    id: Date.now(),
+                    role: 'assistant',
+                    content: response.content,
+                    timestamp: new Date(),
+                    actions: response.actions || []
+                };
+                
+                this.chatMessages.push(assistantMessage);
+                
+            } catch (error) {
+                console.error('Chat error:', error);
+                const errorMessage = {
+                    id: Date.now(),
+                    role: 'assistant',
+                    content: `Sorry, I encountered an error: ${error.message}. Please try again.`,
+                    timestamp: new Date()
+                };
+                this.chatMessages.push(errorMessage);
+            } finally {
+                this.chatLoading = false;
+                this.$nextTick(() => {
+                    const chatContainer = document.querySelector('.ai-chat-messages');
+                    if (chatContainer) {
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                    }
+                });
+            }
+        },
+        
+        getLoadingMessage() {
+            switch (this.assistantMode) {
+                case 'code': return 'Analyzing code...';
+                case 'test': return 'Generating tests...';
+                case 'security': return 'Scanning for security issues...';
+                default: return 'Thinking...';
+            }
+        },
+        
+        async sendCodeAnalysisRequest(message) {
+            const requestData = {
+                message: message,
+                mode: 'code',
+                model: this.selectedModel,
+                context: {
+                    selectedFile: this.selectedFile,
+                    hasChanges: this.hasChanges,
+                    projectId: this.projectId,
+                    branch: this.currentBranch
+                }
+            };
+            
+            const response = await fetch('/api/v2/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return await response.json();
+        },
+
+        async sendTestGenerationRequest(message) {
+            const requestData = {
+                message: message,
+                mode: 'test',
+                model: this.selectedModel,
+                context: {
+                    selectedFiles: this.selectedTestFiles,
+                    testConfig: this.testConfig,
+                    projectId: this.projectId,
+                    branch: this.currentBranch,
+                    modifiedFiles: this.getModifiedFiles()
+                }
+            };
+            
+            const response = await fetch('/api/v2/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return await response.json();
+        },
+
+        async sendSecurityAnalysisRequest(message) {
+            const requestData = {
+                message: message,
+                mode: 'security',
+                model: this.selectedModel,
+                context: {
+                    selectedFiles: this.selectedSecurityFiles,
+                    securityConfig: this.securityConfig,
+                    projectId: this.projectId,
+                    branch: this.currentBranch
+                }
+            };
+            
+            const response = await fetch('/api/v2/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return await response.json();
+        },
+
+        async sendGeneralChatRequest(message) {
+            const requestData = {
+                message: message,
+                mode: 'general',
+                model: this.selectedModel,
+                context: {
+                    projectId: this.projectId,
+                    branch: this.currentBranch
+                }
+            };
+            
+            const response = await fetch('/api/v2/ai/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            return await response.json();
+        },
+
+        sendQuickMessage(message) {
+            this.chatInput = message;
+            this.sendChatMessage();
+        },
+
+        executeAction(action) {
+            console.log('Executing action:', action);
+            
+            switch (action.id) {
+                case 'review-file':
+                    if (this.selectedFile) {
+                        this.sendQuickMessage(`Please review the file ${this.selectedFile.name} for potential issues, improvements, and best practices.`);
+                    } else {
+                        this.sendQuickMessage('Please review the current codebase for potential issues and improvements.');
+                    }
+                    break;
+                    
+                case 'explain-code':
+                    if (this.selectedFile) {
+                        this.sendQuickMessage(`Please explain how the code in ${this.selectedFile.name} works and what it does.`);
+                    }
+                    break;
+                    
+                case 'generate-tests':
+                    const testFiles = this.selectedTestFiles.length > 0 ? this.selectedTestFiles : [this.selectedFile?.path].filter(Boolean);
+                    if (testFiles.length > 0) {
+                        this.sendQuickMessage(`Generate ${this.testConfig.type} tests for: ${testFiles.join(', ')}`);
+                    } else {
+                        this.sendQuickMessage('Generate comprehensive test suites for the selected files.');
+                    }
+                    break;
+                    
+                case 'test-strategy':
+                    this.sendQuickMessage('Suggest a comprehensive testing strategy for this project including unit, integration, and e2e tests.');
+                    break;
+                    
+                case 'scan-vulnerabilities':
+                    this.sendQuickMessage('Scan the selected files for security vulnerabilities and provide recommendations.');
+                    break;
+                    
+                case 'check-dependencies':
+                    this.sendQuickMessage('Analyze the project dependencies for security vulnerabilities and outdated packages.');
+                    break;
+                    
+                default:
+                    console.warn('Unknown action:', action.id);
+            }
+        },
+
+        // Utility methods
+        autoResizeTextarea(event) {
+            const textarea = event.target;
+            textarea.style.height = '24px';
+            textarea.style.height = Math.min(textarea.scrollHeight, 60) + 'px';
+        },
+
+        formatMessage(content) {
+            // Simple markdown-like formatting
+            return content
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+        },
+
+        formatTimestamp(timestamp) {
+            return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        },
+
+        // Dependency graph methods
         async loadDependencyGraph() {
             if (this.loadingGraph) return;
             
@@ -552,16 +804,16 @@ function repositoryBrowser() {
                 // Render mini graph
                 this.renderMiniGraph();
                 
-                this.showNotification('success', `Dependency graph loaded: ${this.dependencyGraph.nodes.length} files, ${this.dependencyGraph.edges.length} connections`);
+                this.showNotification?.('success', `Dependency graph loaded: ${this.dependencyGraph.nodes.length} files, ${this.dependencyGraph.edges.length} connections`);
                 
             } catch (error) {
                 console.error('Error loading dependency graph:', error);
-                this.showNotification('error', `Failed to load dependency graph: ${error.message}`);
+                this.showNotification?.('error', `Failed to load dependency graph: ${error.message}`);
             } finally {
                 this.loadingGraph = false;
             }
         },
-        
+
         processDependencyData(data) {
             console.log('Processing dependency data...');
             
@@ -570,7 +822,7 @@ function repositoryBrowser() {
             const nodeMap = new Map();
             
             // Create nodes for each file
-            data.files.forEach((file, index) => {
+            data.files?.forEach((file, index) => {
                 const node = {
                     id: `file-${index}`,
                     name: file.path.split('/').pop(),
@@ -590,7 +842,7 @@ function repositoryBrowser() {
             });
             
             // Create edges for dependencies
-            data.files.forEach(file => {
+            data.files?.forEach(file => {
                 const sourceNode = nodeMap.get(file.path);
                 if (!sourceNode) return;
                 
@@ -609,47 +861,18 @@ function repositoryBrowser() {
                         targetNode.connections++;
                     }
                 });
-                
-                // Function call dependencies
-                (file.function_calls || []).forEach(funcCall => {
-                    const targetNode = Array.from(nodeMap.values()).find(n => 
-                        n.functions.some(f => f.name === funcCall.function)
-                    );
-                    if (targetNode && sourceNode.id !== targetNode.id) {
-                        edges.push({
-                            id: `${sourceNode.id}-${targetNode.id}-func`,
-                            source: sourceNode.id,
-                            target: targetNode.id,
-                            type: 'function_call',
-                            weight: 0.5
-                        });
-                        sourceNode.connections++;
-                        targetNode.connections++;
-                    }
-                });
             });
             
             console.log(`Processed ${nodes.length} nodes and ${edges.length} edges`);
             return { nodes, edges, metadata: data.metadata || {} };
         },
-        
+
         renderMiniGraph() {
             if (!this.dependencyGraph.nodes.length) return;
             
             const canvas = document.getElementById('dependency-graph-mini');
             if (!canvas) return;
             
-            // Check if we should use vis-network or canvas fallback
-            if (window.visNetworkLoaded === true) {
-                // Use vis-network for interactive mini graph
-                this.renderMiniGraphWithVis(canvas);
-            } else {
-                // Use canvas fallback for simple visualization
-                this.renderMiniGraphWithCanvas(canvas);
-            }
-        },
-        
-        renderMiniGraphWithCanvas(canvas) {
             const ctx = canvas.getContext('2d');
             const rect = canvas.getBoundingClientRect();
             canvas.width = rect.width;
@@ -659,8 +882,8 @@ function repositoryBrowser() {
             ctx.fillStyle = '#1f2937';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Simple force-directed layout for mini preview
-            const nodes = this.dependencyGraph.nodes.slice(0, 20); // Limit for performance
+            // Simple visualization
+            const nodes = this.dependencyGraph.nodes.slice(0, 10);
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
             const radius = Math.min(canvas.width, canvas.height) / 3;
@@ -691,827 +914,137 @@ function repositoryBrowser() {
             nodes.forEach(node => {
                 const nodeRadius = Math.max(3, Math.min(8, node.connections));
                 
-                // Node color based on type
-                const colors = {
-                    'Python': '#3b82f6',
-                    'JavaScript': '#f59e0b',
-                    'TypeScript': '#6366f1',
-                    'JSON': '#10b981',
-                    'CSS': '#ec4899'
-                };
-                
-                ctx.fillStyle = colors[node.type] || '#6b7280';
+                ctx.fillStyle = '#3b82f6';
                 ctx.beginPath();
                 ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
                 ctx.fill();
-                
-                // Highlight highly connected nodes
-                if (node.connections > 3) {
-                    ctx.strokeStyle = '#fbbf24';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                }
             });
         },
-        
-        renderMiniGraphWithVis(canvas) {
-            // Convert canvas to a div for vis-network
-            const container = canvas.parentNode;
-            const visDiv = document.createElement('div');
-            visDiv.id = 'dependency-graph-mini-vis';
-            visDiv.style.width = '100%';
-            visDiv.style.height = '100%';
-            
-            container.replaceChild(visDiv, canvas);
-            
-            try {
-                const nodes = new vis.DataSet(this.dependencyGraph.nodes.slice(0, 15).map(node => ({
-                    id: node.id,
-                    label: node.name.length > 10 ? node.name.substring(0, 10) + '...' : node.name,
-                    size: Math.max(5, Math.min(15, node.connections * 2)),
-                    color: this.getNodeColor(node).background,
-                    font: { color: '#e5e7eb', size: 8 }
-                })));
-                
-                const edges = new vis.DataSet(this.dependencyGraph.edges.filter(edge => {
-                    const sourceExists = nodes.get(edge.source);
-                    const targetExists = nodes.get(edge.target);
-                    return sourceExists && targetExists;
-                }).slice(0, 20).map(edge => ({
-                    from: edge.source,
-                    to: edge.target,
-                    color: this.getEdgeColor(edge.type),
-                    width: 1
-                })));
-                
-                const data = { nodes, edges };
-                const options = {
-                    layout: { randomSeed: 2 },
-                    physics: { enabled: false },
-                    interaction: { dragNodes: false, dragView: false, zoomView: false },
-                    nodes: { borderWidth: 0, font: { size: 8 } },
-                    edges: { smooth: false }
-                };
-                
-                this.miniGraphInstance = new vis.Network(visDiv, data, options);
-            } catch (error) {
-                console.error('Error rendering mini graph with vis:', error);
-                // Fall back to canvas if vis fails
-                const newCanvas = document.createElement('canvas');
-                newCanvas.id = 'dependency-graph-mini';
-                newCanvas.className = 'w-full h-full cursor-pointer';
-                newCanvas.addEventListener('click', () => this.openFullGraphView());
-                container.replaceChild(newCanvas, visDiv);
-                this.renderMiniGraphWithCanvas(newCanvas);
-            }
-        },
-        
+
         openFullGraphView() {
             console.log('Opening full graph view');
-            
-            // Check if we have dependency data
-            if (!this.dependencyGraph.nodes.length) {
-                this.showNotification('warning', 'No dependency data available. Please load the dependency graph first.');
-                return;
-            }
-            
-            // Open modal regardless of vis-network status
             this.showGraphModal = true;
             this.loadingFullGraph = true;
             
-            // Wait for vis-network to be ready (or fallback to be ready)
-            const renderGraph = () => {
+            setTimeout(() => {
                 this.renderFullGraph();
                 this.loadingFullGraph = false;
-            };
-            
-            if (window.visNetworkLoaded) {
-                // Already loaded (either real or fallback)
-                setTimeout(renderGraph, 100);
-            } else {
-                // Wait for vis-network to load
-                const timeout = setTimeout(() => {
-                    console.log('Timeout waiting for vis-network, using fallback');
-                    renderGraph();
-                }, 3000);
-                
-                window.addEventListener('visNetworkReady', () => {
-                    clearTimeout(timeout);
-                    renderGraph();
-                }, { once: true });
-            }
+            }, 100);
         },
-        
+
         renderFullGraph() {
-            const container = document.getElementById('dependency-graph-full');
-            if (!container || !this.dependencyGraph.nodes.length) return;
-            
-            // Clear previous instance
-            if (this.fullGraphInstance) {
-                try {
-                    this.fullGraphInstance.destroy();
-                } catch (e) {
-                    console.warn('Error destroying previous graph instance:', e);
-                }
-                this.fullGraphInstance = null;
-            }
-            
-            // Check vis-network availability and render accordingly
-            if (window.visNetworkLoaded === true) {
-                this.renderFullGraphWithVis(container);
-            } else if (window.visNetworkLoaded === 'fallback') {
-                this.renderFullGraphFallback(container);
-            } else {
-                this.renderFullGraphFallback(container);
-            }
+            // Placeholder for full graph rendering
+            console.log('Rendering full graph...');
         },
-        
-        renderFullGraphWithVis(container) {
+
+        // Analysis functionality
+        async commitChanges() {
+            if (!this.selectedFile || !this.monacoEditor || !this.hasChanges) return;
+            
+            const newContent = this.monacoEditor.getValue();
+            const commitMessage = prompt('Enter commit message:', `Update ${this.selectedFile.name}`);
+            
+            if (!commitMessage) return;
+            
             try {
-                // Initialize vis.js network with correct API
-                const nodes = new vis.DataSet(this.dependencyGraph.nodes.map(node => ({
-                    id: node.id,
-                    label: node.name,
-                    title: `${node.fullPath}\nType: ${node.type}\nConnections: ${node.connections}`,
-                    size: Math.max(10, Math.min(30, node.connections * 3)),
-                    color: this.getNodeColor(node),
-                    font: { color: '#e5e7eb', size: 12 },
-                    borderWidth: 2,
-                    borderColor: '#374151'
-                })));
+                this.loading = true;
+                this.loadingMessage = 'Committing changes...';
                 
-                const edges = new vis.DataSet(this.dependencyGraph.edges.map(edge => ({
-                    id: edge.id,
-                    from: edge.source,
-                    to: edge.target,
-                    color: this.getEdgeColor(edge.type),
-                    width: edge.weight * 2,
-                    arrows: 'to',
-                    smooth: { type: 'continuous' }
-                })));
-                
-                const data = { nodes, edges };
-                const options = {
-                    layout: {
-                        improvedLayout: true,
-                        clusterThreshold: 150
-                    },
-                    physics: {
-                        enabled: true,
-                        stabilization: { iterations: 100 }
-                    },
-                    interaction: {
-                        hover: true,
-                        selectConnectedEdges: false
-                    },
-                    nodes: {
-                        shape: 'dot',
-                        scaling: { min: 10, max: 30 }
-                    },
-                    edges: {
-                        smooth: true,
-                        scaling: { min: 1, max: 5 }
-                    }
-                };
-                
-                this.fullGraphInstance = new vis.Network(container, data, options);
-                
-                // Add event listeners
-                this.fullGraphInstance.on('selectNode', (params) => {
-                    if (params.nodes.length > 0) {
-                        const nodeId = params.nodes[0];
-                        this.selectedNode = this.dependencyGraph.nodes.find(n => n.id === nodeId);
-                    }
+                const response = await fetch(`/gitlab/repository/${this.projectId}/commit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: this.selectedFile.path,
+                        branch: this.currentBranch,
+                        content: newContent,
+                        commit_message: commitMessage
+                    })
                 });
                 
-                this.fullGraphInstance.on('deselectNode', () => {
-                    this.selectedNode = null;
-                });
+                const result = await response.json();
                 
-                console.log('Full dependency graph rendered successfully with vis-network');
-                
-            } catch (error) {
-                console.error('Error rendering full graph with vis:', error);
-                this.renderFullGraphFallback(container);
-            }
-        },
-        
-        renderFullGraphFallback(container) {
-            console.log('Using fallback graph visualization');
-            
-            // Create a comprehensive fallback interface
-            container.innerHTML = `
-                <div class="h-full bg-gray-800 p-6 overflow-y-auto">
-                    <div class="text-center mb-6">
-                        <i class="fas fa-project-diagram text-4xl mb-4 text-blue-400"></i>
-                        <h3 class="text-xl font-medium text-white mb-2">Dependency Analysis</h3>
-                        <p class="text-sm text-gray-400">Interactive visualization unavailable - showing data view</p>
-                    </div>
-                    
-                    <!-- Statistics -->
-                    <div class="grid grid-cols-2 gap-4 mb-6">
-                        <div class="bg-gray-700 rounded-lg p-4 text-center">
-                            <div class="text-2xl font-bold text-blue-400">${this.dependencyGraph.nodes.length}</div>
-                            <div class="text-sm text-gray-300">Files Analyzed</div>
-                        </div>
-                        <div class="bg-gray-700 rounded-lg p-4 text-center">
-                            <div class="text-2xl font-bold text-green-400">${this.dependencyGraph.edges.length}</div>
-                            <div class="text-sm text-gray-300">Dependencies Found</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Top Connected Files -->
-                    <div class="mb-6">
-                        <h4 class="text-lg font-medium text-white mb-3 flex items-center">
-                            <i class="fas fa-star mr-2 text-yellow-400"></i>
-                            Most Connected Files
-                        </h4>
-                        <div class="space-y-2">
-                            ${this.getTopConnectedFiles().map(file => `
-                                <div class="bg-gray-700 rounded p-3 flex justify-between items-center">
-                                    <div>
-                                        <div class="font-mono text-sm text-white">${file.name}</div>
-                                        <div class="text-xs text-gray-400">Type: ${this.dependencyGraph.nodes.find(n => n.id === file.id)?.type || 'Unknown'}</div>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="text-lg font-bold text-blue-400">${file.connections}</div>
-                                        <div class="text-xs text-gray-400">connections</div>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                    
-                    <!-- File List -->
-                    <div>
-                        <h4 class="text-lg font-medium text-white mb-3 flex items-center">
-                            <i class="fas fa-list mr-2 text-green-400"></i>
-                            All Files (${this.dependencyGraph.nodes.length})
-                        </h4>
-                        <div class="space-y-1 max-h-96 overflow-y-auto">
-                            ${this.dependencyGraph.nodes.map(node => `
-                                <div class="bg-gray-700 rounded p-2 flex justify-between items-center hover:bg-gray-600 cursor-pointer"
-                                     onclick="this.classList.toggle('bg-gray-600')">
-                                    <div class="flex items-center space-x-2">
-                                        <div class="w-3 h-3 rounded-full" style="background-color: ${this.getNodeColor(node).background}"></div>
-                                        <span class="font-mono text-sm text-white">${node.name}</span>
-                                        <span class="text-xs text-gray-400">(${node.type})</span>
-                                    </div>
-                                    <div class="text-xs text-blue-400">${node.connections} deps</div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            console.log('Fallback graph visualization rendered');
-        },
-        
-        getNodeColor(node) {
-            const typeColors = {
-                'Python': { background: '#3b82f6', border: '#1e40af' },
-                'JavaScript': { background: '#f59e0b', border: '#d97706' },
-                'TypeScript': { background: '#6366f1', border: '#4f46e5' },
-                'JSON': { background: '#10b981', border: '#059669' },
-                'CSS': { background: '#ec4899', border: '#db2777' },
-                'HTML': { background: '#f97316', border: '#ea580c' },
-                'Markdown': { background: '#6b7280', border: '#4b5563' }
-            };
-            
-            return typeColors[node.type] || { background: '#6b7280', border: '#4b5563' };
-        },
-        
-        getEdgeColor(type) {
-            const edgeColors = {
-                'import': '#10b981',
-                'function_call': '#3b82f6',
-                'class_inheritance': '#8b5cf6',
-                'export': '#f59e0b'
-            };
-            
-            return edgeColors[type] || '#6b7280';
-        },
-        
-        // Graph utility methods
-        getTopConnectedFiles() {
-            if (!this.dependencyGraph.nodes.length) return [];
-            
-            return this.dependencyGraph.nodes
-                .sort((a, b) => b.connections - a.connections)
-                .slice(0, 5)
-                .map(node => ({
-                    id: node.id,
-                    name: node.name,
-                    connections: node.connections
-                }));
-        },
-        
-        getNodeConnections(node) {
-            if (!node || !this.dependencyGraph.edges.length) return [];
-            
-            const connections = [];
-            this.dependencyGraph.edges.forEach(edge => {
-                if (edge.source === node.id) {
-                    const targetNode = this.dependencyGraph.nodes.find(n => n.id === edge.target);
-                    if (targetNode) {
-                        connections.push({
-                            id: targetNode.id,
-                            name: targetNode.name,
-                            type: edge.type
-                        });
-                    }
-                }
-                if (edge.target === node.id) {
-                    const sourceNode = this.dependencyGraph.nodes.find(n => n.id === edge.source);
-                    if (sourceNode) {
-                        connections.push({
-                            id: sourceNode.id,
-                            name: sourceNode.name,
-                            type: edge.type
-                        });
-                    }
-                }
-            });
-            
-            return connections;
-        },
-        
-        getConnectionTypeColor(type) {
-            const colors = {
-                'import': 'text-green-400',
-                'function_call': 'text-blue-400',
-                'class_inheritance': 'text-purple-400',
-                'export': 'text-yellow-400'
-            };
-            return colors[type] || 'text-gray-400';
-        },
-        
-        getAverageConnections() {
-            if (!this.dependencyGraph.nodes.length) return '0.0';
-            const total = this.dependencyGraph.nodes.reduce((sum, node) => sum + node.connections, 0);
-            return (total / this.dependencyGraph.nodes.length).toFixed(1);
-        },
-        
-        getMaxConnections() {
-            if (!this.dependencyGraph.nodes.length) return 0;
-            return Math.max(...this.dependencyGraph.nodes.map(node => node.connections));
-        },
-        
-        // Graph controls
-        toggleGraphFilter(filterType) {
-            this.graphFilters[filterType] = !this.graphFilters[filterType];
-            if (this.fullGraphInstance) {
-                this.renderFullGraph(); // Re-render with new filters
-            }
-        },
-        
-        updateGraphLayout() {
-            if (!this.fullGraphInstance) return;
-            
-            const layoutOptions = {
-                force: { physics: { enabled: true } },
-                hierarchical: { 
-                    layout: { hierarchical: { direction: 'UD', sortMethod: 'directed' } },
-                    physics: { enabled: false }
-                },
-                circular: {
-                    layout: { randomSeed: 2 },
-                    physics: { enabled: false }
-                },
-                grid: {
-                    layout: { randomSeed: undefined },
-                    physics: { enabled: false }
-                }
-            };
-            
-            this.fullGraphInstance.setOptions(layoutOptions[this.graphLayout] || layoutOptions.force);
-        },
-        
-        centerGraph() {
-            if (this.fullGraphInstance) {
-                this.fullGraphInstance.fit();
-            }
-        },
-        
-        exportGraph() {
-            const graphData = {
-                nodes: this.dependencyGraph.nodes,
-                edges: this.dependencyGraph.edges,
-                metadata: {
-                    project: this.projectName,
-                    branch: this.currentBranch,
-                    exported: new Date().toISOString()
-                }
-            };
-            
-            const blob = new Blob([JSON.stringify(graphData, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${this.projectName}-dependency-graph.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        },
-        
-        refreshDependencyCache() {
-            const cacheKey = `${this.projectId}-${this.currentBranch}`;
-            this.dependencyCache.delete(cacheKey);
-            this.loadDependencyGraph();
-        },
-        
-        // === MULTI-FILE EDIT SUPPORT ===
-        
-        getConnectedFiles(filePath) {
-            if (!this.dependencyGraph.nodes.length) return [];
-            
-            const currentNode = this.dependencyGraph.nodes.find(n => n.fullPath === filePath);
-            if (!currentNode) return [];
-            
-            const connectedFiles = this.getNodeConnections(currentNode);
-            return connectedFiles.map(conn => ({
-                path: this.dependencyGraph.nodes.find(n => n.id === conn.id)?.fullPath,
-                type: conn.type,
-                name: conn.name
-            })).filter(f => f.path);
-        },
-        
-        async updateMultipleFiles(changes) {
-            // This will be called when AI makes changes to multiple connected files
-            console.log('Updating multiple connected files:', changes);
-            
-            const results = [];
-            for (const change of changes) {
-                try {
-                    const result = await this.updateSingleFile(change.path, change.content, change.message);
-                    results.push({ ...change, success: true, result });
-                } catch (error) {
-                    results.push({ ...change, success: false, error: error.message });
-                }
-            }
-            
-            return results;
-        },
-        
-        async updateSingleFile(filePath, content, commitMessage) {
-            const response = await fetch(`/gitlab/repository/${this.projectId}/commit`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    file_path: filePath,
-                    branch: this.currentBranch,
-                    content: content,
-                    commit_message: commitMessage || `Update ${filePath}`
-                })
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Failed to update ${filePath}: ${response.status}`);
-            }
-            
-            return response.json();
-        },
-        
-        // === AI ASSISTANT SYSTEM ===
-        
-        // Technology Detection and Agent Selection
-        detectTechnology(file) {
-            if (!file) return null;
-            
-            const language = this.getMonacoLanguage(file.name);
-            const fileContent = file.content || '';
-            
-            // Enhanced detection based on content analysis
-            let detectedAgent = null;
-            let confidence = 50;
-            
-            // React/Frontend detection
-            if (['jsx', 'tsx'].includes(language) || 
-                fileContent.includes('import React') || 
-                fileContent.includes('useState') || 
-                fileContent.includes('useEffect')) {
-                detectedAgent = 'frontend-react';
-                confidence = 90;
-            }
-            // Python backend detection
-            else if (language === 'python') {
-                if (fileContent.includes('django') || fileContent.includes('from django')) {
-                    detectedAgent = 'backend-python';
-                    confidence = 95;
-                } else if (fileContent.includes('flask') || fileContent.includes('from flask')) {
-                    detectedAgent = 'backend-python';
-                    confidence = 95;
-                } else if (fileContent.includes('fastapi') || fileContent.includes('from fastapi')) {
-                    detectedAgent = 'backend-python';
-                    confidence = 95;
+                if (result.success) {
+                    this.hasChanges = false;
+                    this.selectedFile.content = newContent;
+                    this.showNotification?.('success', 'Changes committed successfully!');
+                    await this.loadCommits();
                 } else {
-                    detectedAgent = 'backend-python';
-                    confidence = 80;
+                    this.showNotification?.('error', 'Error committing changes: ' + result.error);
                 }
-            }
-            // Node.js backend detection
-            else if (['javascript', 'typescript'].includes(language)) {
-                if (fileContent.includes('express') || fileContent.includes('require(') || fileContent.includes('import')) {
-                    detectedAgent = 'backend-node';
-                    confidence = 85;
-                } else {
-                    detectedAgent = 'frontend-react';
-                    confidence = 70;
-                }
-            }
-            // Database detection
-            else if (['sql', 'json'].includes(language)) {
-                detectedAgent = 'database';
-                confidence = 80;
-            }
-            // DevOps detection
-            else if (['dockerfile', 'yaml', 'shell', 'bash'].includes(language) ||
-                     file.name.toLowerCase().includes('docker') ||
-                     file.name.toLowerCase().includes('ci') ||
-                     file.name.toLowerCase().includes('deploy')) {
-                detectedAgent = 'devops';
-                confidence = 85;
-            }
-            // Mobile detection
-            else if (['dart', 'swift', 'kotlin'].includes(language)) {
-                detectedAgent = 'mobile';
-                confidence = 90;
-            }
-            
-            if (detectedAgent && this.availableAgents[detectedAgent]) {
-                return {
-                    agent: detectedAgent,
-                    name: this.availableAgents[detectedAgent].name,
-                    confidence: confidence,
-                    specialties: this.availableAgents[detectedAgent].specialties
-                };
-            }
-            
-            return {
-                agent: 'general',
-                name: 'General Code Assistant',
-                confidence: 50,
-                specialties: ['general-analysis', 'best-practices']
-            };
-        },
-        
-        // Update technology detection when file changes
-        updateTechnologyDetection() {
-            if (this.selectedFile) {
-                this.detectedTech = this.detectTechnology(this.selectedFile);
-                console.log('Technology detected:', this.detectedTech);
+                
+                this.loading = false;
+                
+            } catch (error) {
+                console.error('Error committing changes:', error);
+                this.showNotification?.('error', 'Error committing changes: ' + error.message);
+                this.loading = false;
             }
         },
-        
-        // File Review Functionality
-        async startFileReview() {
-            if (!this.selectedFile) return;
-            
-            this.reviewLoading = true;
-            this.reviewResults = [];
-            
-            try {
-                const agent = this.detectedTech?.agent || 'general';
-                const response = await fetch('/ai/review-file', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: this.selectedFile.path,
-                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
-                        language: this.getMonacoLanguage(this.selectedFile.name),
-                        agent: agent,
-                        project_context: {
-                            project_id: this.projectId,
-                            branch: this.currentBranch,
-                            file_tree: this.fileTree.map(f => ({ path: f.path, type: f.type }))
+
+        // Initialize horizontal sidebar tabs functionality
+        initializeSidebarTabs() {
+            // Set up tab switching logic
+            this.$nextTick(() => {
+                const tabs = document.querySelectorAll('.sidebar-tab');
+                const contents = document.querySelectorAll('.tab-content');
+                
+                tabs.forEach(tab => {
+                    tab.addEventListener('click', () => {
+                        const targetContent = tab.dataset.content;
+                        
+                        // Remove active class from all tabs
+                        tabs.forEach(t => t.classList.remove('active'));
+                        // Add active class to clicked tab
+                        tab.classList.add('active');
+                        
+                        // Hide all content
+                        contents.forEach(content => content.classList.remove('active'));
+                        
+                        // Show target content
+                        const targetElement = document.getElementById(`${targetContent}-content`);
+                        if (targetElement) {
+                            targetElement.classList.add('active');
                         }
-                    })
+                        
+                        // Update active tab state
+                        this.activeTab = targetContent;
+                        
+                        // Load data if needed
+                        this.onTabChange(targetContent);
+                    });
                 });
-                
-                if (!response.ok) {
-                    throw new Error(`Review failed: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                this.reviewResults = result.issues || [];
-                
-                this.showNotification('success', `Review completed: ${this.reviewResults.length} issues found`);
-                
-            } catch (error) {
-                console.error('File review error:', error);
-                this.showNotification('error', `Review failed: ${error.message}`);
-            } finally {
-                this.reviewLoading = false;
+            });
+        },
+        
+        // Handle tab change events
+        onTabChange(tabName) {
+            switch (tabName) {
+                case 'graph':
+                    if (this.dependencyGraph.nodes.length === 0) {
+                        this.loadDependencyGraph();
+                    }
+                    break;
+                case 'commits':
+                    if (this.commits.length === 0) {
+                        this.loadCommits();
+                    }
+                    break;
+                case 'prs':
+                    if (this.pullRequests.length === 0) {
+                        this.loadPullRequests();
+                    }
+                    break;
             }
         },
-        
-        // Test Generation Functionality
-        async startFileTest() {
-            if (!this.selectedFile) return;
-            
-            this.testLoading = true;
-            this.testResults = null;
-            
-            try {
-                const agent = this.detectedTech?.agent || 'general';
-                const response = await fetch('/ai/generate-tests', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: this.selectedFile.path,
-                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
-                        language: this.getMonacoLanguage(this.selectedFile.name),
-                        agent: agent,
-                        test_config: this.testConfig,
-                        project_context: {
-                            project_id: this.projectId,
-                            branch: this.currentBranch
-                        }
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Test generation failed: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                this.testResults = {
-                    code: result.test_code,
-                    explanation: result.explanation,
-                    coverage_areas: result.coverage_areas
-                };
-                
-                this.showNotification('success', 'Tests generated successfully');
-                
-            } catch (error) {
-                console.error('Test generation error:', error);
-                this.showNotification('error', `Test generation failed: ${error.message}`);
-            } finally {
-                this.testLoading = false;
-            }
-        },
-        
-        // Code Optimization Functionality
-        async startFileOptimization() {
-            if (!this.selectedFile) return;
-            
-            this.optimizeLoading = true;
-            this.optimizationResults = [];
-            
-            try {
-                const agent = this.detectedTech?.agent || 'general';
-                const response = await fetch('/ai/optimize-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: this.selectedFile.path,
-                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
-                        language: this.getMonacoLanguage(this.selectedFile.name),
-                        agent: agent,
-                        project_context: {
-                            project_id: this.projectId,
-                            branch: this.currentBranch,
-                            dependencies: this.getConnectedFiles(this.selectedFile.path)
-                        }
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Optimization failed: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                this.optimizationResults = result.optimizations || [];
-                
-                this.showNotification('success', `Optimization completed: ${this.optimizationResults.length} suggestions found`);
-                
-            } catch (error) {
-                console.error('Code optimization error:', error);
-                this.showNotification('error', `Optimization failed: ${error.message}`);
-            } finally {
-                this.optimizeLoading = false;
-            }
-        },
-        
-        // Apply optimization
-        async applyOptimization(optimization) {
-            if (!this.monacoEditor || !optimization.line_number) return;
-            
-            try {
-                const model = this.monacoEditor.getModel();
-                const lineContent = model.getLineContent(optimization.line_number);
-                
-                // Apply the optimization by replacing the line
-                const range = {
-                    startLineNumber: optimization.line_number,
-                    startColumn: 1,
-                    endLineNumber: optimization.line_number,
-                    endColumn: lineContent.length + 1
-                };
-                
-                this.monacoEditor.executeEdits('optimization', [{
-                    range: range,
-                    text: optimization.after
-                }]);
-                
-                this.showNotification('success', 'Optimization applied');
-                
-            } catch (error) {
-                console.error('Error applying optimization:', error);
-                this.showNotification('error', 'Failed to apply optimization');
-            }
-        },
-        
-        // Chat Functionality
-        async sendChatMessage() {
-            if (!this.chatInput.trim() || !this.selectedFile) return;
-            
-            const userMessage = {
-                id: Date.now(),
-                role: 'user',
-                content: this.chatInput,
-                timestamp: new Date().toLocaleTimeString()
-            };
-            
-            this.chatMessages.push(userMessage);
-            const messageToSend = this.chatInput;
-            this.chatInput = '';
-            this.chatLoading = true;
-            
-            try {
-                const agent = this.detectedTech?.agent || 'general';
-                const response = await fetch('/ai/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: messageToSend,
-                        file_path: this.selectedFile.path,
-                        file_content: this.monacoEditor ? this.monacoEditor.getValue() : this.selectedFile.content,
-                        language: this.getMonacoLanguage(this.selectedFile.name),
-                        agent: agent,
-                        chat_history: this.chatMessages.slice(-10), // Last 10 messages for context
-                        project_context: {
-                            project_id: this.projectId,
-                            branch: this.currentBranch
-                        }
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Chat failed: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                const assistantMessage = {
-                    id: Date.now() + 1,
-                    role: 'assistant',
-                    content: result.response,
-                    timestamp: new Date().toLocaleTimeString()
-                };
-                
-                this.chatMessages.push(assistantMessage);
-                
-            } catch (error) {
-                console.error('Chat error:', error);
-                const errorMessage = {
-                    id: Date.now() + 1,
-                    role: 'assistant',
-                    content: `Sorry, I encountered an error: ${error.message}`,
-                    timestamp: new Date().toLocaleTimeString()
-                };
-                this.chatMessages.push(errorMessage);
-            } finally {
-                this.chatLoading = false;
-            }
-        },
-        
-        // Utility methods for AI assistant
-        copyTestCode() {
-            if (this.testResults?.code) {
-                navigator.clipboard.writeText(this.testResults.code);
-                this.showNotification('success', 'Test code copied to clipboard');
-            }
-        },
-        
-        getSeverityIcon(severity) {
-            const icons = {
-                'error': 'fas fa-times-circle text-red-400',
-                'warning': 'fas fa-exclamation-triangle text-yellow-400',
-                'info': 'fas fa-info-circle text-blue-400',
-                'success': 'fas fa-check-circle text-green-400'
-            };
-            return icons[severity] || 'fas fa-circle text-gray-400';
-        },
-        
-        getSeverityBadge(severity) {
-            const badges = {
-                'error': 'bg-red-600 text-white',
-                'warning': 'bg-yellow-600 text-black',
-                'info': 'bg-blue-600 text-white',
-                'success': 'bg-green-600 text-white'
-            };
-            return badges[severity] || 'bg-gray-600 text-white';
-        }
     };
-} 
+}
+
+// Activity Bar Navigation - Updated for new layout
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textarea functionality
+    window.autoResizeTextarea = function(event) {
+        const textarea = event.target;
+        textarea.style.height = '24px';
+        textarea.style.height = Math.min(textarea.scrollHeight, 60) + 'px';
+    };
+}); 

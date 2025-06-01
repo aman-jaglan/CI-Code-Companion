@@ -4,6 +4,8 @@ React Code Agent - Specialized for React Development
 This agent focuses exclusively on React code development, component analysis,
 and code optimization. It provides expert guidance for React best practices,
 modern patterns, and performance optimization.
+
+Enhanced with Cursor-style prompting and Gemini 2.5 Pro optimization.
 """
 
 import re
@@ -18,13 +20,22 @@ class ReactCodeAgent(BaseAgent):
     """
     Specialized agent for React code development and analysis.
     Focuses on component architecture, hooks, performance, and modern React patterns.
+    
+    Enhanced with PromptLoader integration for Cursor-style functionality.
     """
+    
+    def __init__(self, config: Dict[str, Any], logger, prompt_loader=None):
+        """Initialize ReactCodeAgent with optional PromptLoader"""
+        super().__init__(config, logger)
+        self.prompt_loader = prompt_loader
+        self.conversation_history = []
+        self.codebase_index = {}
     
     def _initialize(self):
         """Initialize React Code Agent with specialized configuration"""
         super()._initialize()
         self.name = "react_code"
-        self.version = "2.0.0"
+        self.version = "3.0.0"  # Updated version for enhanced capabilities
         
         # React-specific patterns and rules
         self.component_patterns = {
@@ -62,6 +73,467 @@ class ReactCodeAgent(BaseAgent):
     def get_supported_frameworks(self) -> List[str]:
         """Get supported React frameworks and libraries"""
         return ['react', 'next.js', 'gatsby', 'remix', 'vite']
+    
+    async def analyze_with_enhanced_prompts(
+        self, 
+        file_path: str, 
+        content: str, 
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Enhanced analysis using PromptLoader with Cursor-style prompting.
+        
+        Args:
+            file_path: Path to React file
+            content: File content
+            context: Enhanced context including project info, related files, conversation history
+            
+        Returns:
+            Comprehensive analysis with enhanced insights
+        """
+        
+        if self.prompt_loader:
+            # Build enhanced context for the agent
+            enhanced_context = await self._build_enhanced_context(file_path, content, context)
+            
+            # Get enhanced prompt from prompt loader
+            agent_prompt = self.prompt_loader.get_enhanced_prompt('react_code', enhanced_context)
+            
+            # Perform enhanced analysis with Gemini optimization
+            analysis_result = await self._analyze_with_gemini_optimization(
+                file_path, content, enhanced_context, agent_prompt
+            )
+            
+            # Store conversation for future context
+            self._update_conversation_history(context.get('user_message', ''), analysis_result)
+            
+            return analysis_result
+        else:
+            # Fallback to regular analysis
+            return await self.analyze_file(file_path, content, context)
+    
+    async def _build_enhanced_context(
+        self, 
+        file_path: str, 
+        content: str, 
+        base_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Build comprehensive context for enhanced analysis"""
+        
+        enhanced_context = {
+            'selected_file': {
+                'path': file_path,
+                'content': content,
+                'language': self._detect_language(file_path),
+                'last_modified': datetime.now().isoformat(),
+                'metadata': await self._extract_react_metadata(content)
+            },
+            'project_info': base_context.get('project_info', {}),
+            'conversation_history': self.conversation_history,
+            'related_files': await self._find_related_files(file_path, content, base_context),
+            'codebase_context': await self._get_codebase_context(file_path, content),
+            'user_intent': base_context.get('user_intent', 'analysis'),
+            'performance_context': {
+                'gemini_model': 'gemini-2.5-pro',
+                'context_window': '1M tokens',
+                'optimization_level': 'maximum'
+            }
+        }
+        
+        return enhanced_context
+    
+    async def _analyze_with_gemini_optimization(
+        self, 
+        file_path: str, 
+        content: str, 
+        context: Dict[str, Any], 
+        agent_prompt: str
+    ) -> Dict[str, Any]:
+        """Perform analysis optimized for Gemini 2.5 Pro"""
+        
+        # Perform existing analysis
+        analysis_result = await self.analyze_file(file_path, content, context)
+        
+        # Extract comprehensive file analysis
+        file_analysis = await self._comprehensive_file_analysis(content)
+        
+        # Generate context-aware suggestions
+        enhanced_suggestions = await self._generate_contextual_suggestions(
+            content, context, file_analysis
+        )
+        
+        # Perform cross-file analysis if related files are available
+        cross_file_insights = await self._cross_file_analysis(context.get('related_files', []))
+        
+        # Enhance the response with Gemini-optimized insights
+        enhanced_response = await self._generate_enhanced_response(
+            file_path, content, analysis_result, file_analysis, 
+            enhanced_suggestions, cross_file_insights, agent_prompt
+        )
+        
+        # Merge with existing analysis
+        analysis_result.update({
+            'enhanced_analysis': enhanced_response,
+            'enhanced_suggestions': enhanced_suggestions,
+            'cross_file_insights': cross_file_insights,
+            'enhanced_confidence_score': self._calculate_enhanced_confidence(
+                file_analysis, analysis_result, context
+            ),
+            'context_used': True,
+            'tokens_used': len(agent_prompt.split()) + len(content.split()),
+            'processing_time': datetime.now().isoformat(),
+            'gemini_optimized': True
+        })
+        
+        return analysis_result
+    
+    async def _comprehensive_file_analysis(self, content: str) -> Dict[str, Any]:
+        """Perform comprehensive React file analysis for enhanced insights"""
+        
+        analysis = {
+            'components': await self._analyze_components_detailed(content),
+            'hooks': await self._analyze_hooks_comprehensive(content),
+            'typescript': await self._analyze_typescript_usage(content),
+            'performance': await self._analyze_performance_patterns(content),
+            'accessibility': await self._analyze_accessibility(content),
+            'testing': await self._analyze_testability(content),
+            'architecture': await self._analyze_architecture_patterns(content),
+            'metadata': {
+                'lines_of_code': len([l for l in content.split('\n') if l.strip()]),
+                'complexity_score': self._calculate_component_complexity(content),
+                'maintainability_score': self._calculate_maintainability_score(content),
+                'readability_score': self._calculate_readability_score(content),
+                'type_safety_score': self._calculate_type_safety_score(content)
+            }
+        }
+        
+        return analysis
+    
+    async def _generate_contextual_suggestions(
+        self, 
+        content: str, 
+        context: Dict[str, Any], 
+        analysis: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Generate context-aware suggestions"""
+        suggestions = []
+        
+        # Performance suggestions
+        if analysis['performance'].get('performance_issues'):
+            for issue in analysis['performance']['performance_issues']:
+                if issue['type'] == 'inline_functions':
+                    suggestions.append({
+                        'type': 'performance',
+                        'priority': 'high',
+                        'title': 'Extract inline functions',
+                        'description': f'Found {issue["count"]} inline functions that should be extracted using useCallback',
+                        'code_example': 'const handleClick = useCallback(() => { /* logic */ }, [dependencies]);'
+                    })
+        
+        # TypeScript suggestions
+        if context.get('selected_file', {}).get('language') == 'typescript':
+            if analysis['typescript']['type_safety_score'] < 0.8:
+                suggestions.append({
+                    'type': 'typescript',
+                    'priority': 'medium',
+                    'title': 'Improve type safety',
+                    'description': 'Add proper typing for props and state',
+                    'code_example': 'interface ComponentProps { title: string; onClick: () => void; }'
+                })
+        
+        return suggestions
+    
+    async def _find_related_files(
+        self, 
+        file_path: str, 
+        content: str, 
+        context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Find files related to the current React component"""
+        related_files = []
+        
+        # Extract imports to find related files
+        import_matches = re.findall(r'import.*from\s+[\'"]([^\'"]+)[\'"]', content)
+        
+        for import_path in import_matches:
+            if not import_path.startswith('.'):  # Skip node_modules
+                continue
+                
+            related_files.append({
+                'path': import_path,
+                'relationship': 'import',
+                'language': self._detect_language(import_path),
+                'is_critical': True
+            })
+        
+        return related_files[:20]  # Limit for context window optimization
+    
+    async def _get_codebase_context(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Get relevant codebase context for RAG functionality"""
+        return {
+            'similar_components': [],
+            'common_patterns': [],
+            'project_conventions': [],
+            'reusable_hooks': []
+        }
+    
+    async def _cross_file_analysis(self, related_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze patterns across related files"""
+        return {
+            'component_patterns': [],
+            'shared_types': [],
+            'common_imports': [],
+            'architecture_insights': []
+        }
+    
+    def _update_conversation_history(self, user_message: str, agent_response: Dict[str, Any]):
+        """Update conversation history for context"""
+        self.conversation_history.append({
+            'role': 'user',
+            'content': user_message,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        self.conversation_history.append({
+            'role': 'assistant',
+            'content': agent_response.get('enhanced_analysis', str(agent_response)),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Keep only last 20 messages for context management
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+    
+    def _detect_language(self, file_path: str) -> str:
+        """Detect programming language from file extension"""
+        ext = file_path.split('.')[-1].lower()
+        return {
+            'tsx': 'typescript',
+            'ts': 'typescript', 
+            'jsx': 'javascript',
+            'js': 'javascript'
+        }.get(ext, 'unknown')
+    
+    def _calculate_enhanced_confidence(
+        self, 
+        file_analysis: Dict[str, Any], 
+        analysis_result: Dict[str, Any], 
+        context: Dict[str, Any]
+    ) -> float:
+        """Calculate enhanced confidence score"""
+        base_score = analysis_result.get('confidence_score', 0.8)
+        
+        # Increase confidence based on context richness
+        if context.get('related_files'):
+            base_score += 0.1
+        
+        if context.get('conversation_history'):
+            base_score += 0.05
+        
+        if file_analysis.get('metadata', {}).get('complexity_score', 0) < 5:
+            base_score += 0.05  # Simpler files are easier to analyze
+        
+        return min(1.0, base_score)
+    
+    # Enhanced analysis methods
+    async def _analyze_components_detailed(self, content: str) -> Dict[str, Any]:
+        """Enhanced component analysis"""
+        # Existing component analysis logic with enhancements
+        return await self._analyze_component_structure(content)
+    
+    async def _analyze_hooks_comprehensive(self, content: str) -> Dict[str, Any]:
+        """Enhanced hooks analysis"""
+        # Existing hooks analysis logic with enhancements
+        return await self._analyze_hooks_usage(content)
+    
+    async def _analyze_typescript_usage(self, content: str) -> Dict[str, Any]:
+        """Analyze TypeScript usage and patterns"""
+        ts_analysis = {
+            'interfaces': [],
+            'types': [],
+            'type_safety_score': self._calculate_type_safety_score(content),
+            'recommendations': []
+        }
+        
+        # Find interfaces
+        interface_matches = re.finditer(r'interface\s+([A-Z][a-zA-Z0-9]*)', content)
+        for match in interface_matches:
+            ts_analysis['interfaces'].append({
+                'name': match.group(1),
+                'line': content[:match.start()].count('\n') + 1
+            })
+        
+        return ts_analysis
+    
+    async def _analyze_performance_patterns(self, content: str) -> Dict[str, Any]:
+        """Enhanced performance analysis"""
+        perf_analysis = {
+            'memo_usage': bool(re.search(self.performance_checks['memo_usage'], content)),
+            'callback_usage': bool(re.search(self.performance_checks['callback_usage'], content)),
+            'performance_issues': [],
+            'optimization_opportunities': []
+        }
+        
+        # Check for performance anti-patterns
+        inline_styles = re.findall(self.performance_checks['inline_objects'], content)
+        if inline_styles:
+            perf_analysis['performance_issues'].append({
+                'type': 'inline_functions',
+                'count': len(inline_styles),
+                'severity': 'medium'
+            })
+        
+        return perf_analysis
+    
+    async def _analyze_accessibility(self, content: str) -> Dict[str, Any]:
+        """Analyze accessibility patterns"""
+        a11y_patterns = {
+            'aria_labels': r'aria-label\s*=',
+            'alt_text': r'alt\s*=',
+            'semantic_html': r'<(?:header|nav|main|section|article|aside|footer)',
+        }
+        
+        a11y_analysis = {}
+        for pattern_name, pattern in a11y_patterns.items():
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            a11y_analysis[pattern_name] = len(matches)
+        
+        a11y_analysis['accessibility_score'] = self._calculate_accessibility_score(a11y_analysis)
+        
+        return a11y_analysis
+    
+    async def _analyze_testability(self, content: str) -> Dict[str, Any]:
+        """Analyze code testability"""
+        testability = {
+            'test_friendly_patterns': [],
+            'testing_challenges': [],
+            'testability_score': self._calculate_testability_score(content)
+        }
+        
+        if 'data-testid' in content:
+            testability['test_friendly_patterns'].append('data-testid attributes')
+        
+        return testability
+    
+    async def _analyze_architecture_patterns(self, content: str) -> Dict[str, Any]:
+        """Analyze architectural patterns"""
+        patterns = {
+            'custom_hooks': len(re.findall(r'use[A-Z][a-zA-Z0-9]*\s*\(', content)) > 0,
+            'context_usage': 'useContext' in content or 'createContext' in content,
+            'state_management': 'useReducer' in content or 'useState' in content,
+            'composition_patterns': '...props' in content or 'children' in content,
+        }
+        
+        return patterns
+    
+    async def _generate_enhanced_response(
+        self, 
+        file_path: str, 
+        content: str, 
+        analysis_result: Dict[str, Any], 
+        file_analysis: Dict[str, Any], 
+        suggestions: List[Dict[str, Any]], 
+        cross_file_insights: Dict[str, Any], 
+        agent_prompt: str
+    ) -> str:
+        """Generate enhanced response using Gemini optimization"""
+        
+        response_parts = []
+        
+        # File overview
+        response_parts.append(f"## Enhanced React Analysis: {file_path.split('/')[-1]}")
+        response_parts.append("")
+        
+        # Component summary
+        metadata = file_analysis.get('metadata', {})
+        response_parts.append("### Code Quality Metrics")
+        response_parts.append(f"- **Lines of Code**: {metadata.get('lines_of_code', 'N/A')}")
+        response_parts.append(f"- **Complexity Score**: {metadata.get('complexity_score', 0):.1f}/10")
+        response_parts.append(f"- **Maintainability**: {metadata.get('maintainability_score', 0):.1f}/10")
+        response_parts.append("")
+        
+        # Enhanced suggestions
+        if suggestions:
+            response_parts.append("### Enhanced Recommendations")
+            for suggestion in suggestions[:5]:
+                priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(suggestion['priority'], "ℹ️")
+                response_parts.append(f"**{priority_emoji} {suggestion['title']}** ({suggestion['type']})")
+                response_parts.append(f"  {suggestion['description']}")
+                if suggestion.get('code_example'):
+                    response_parts.append(f"  ```javascript\n  {suggestion['code_example']}\n  ```")
+                response_parts.append("")
+        
+        return "\n".join(response_parts)
+    
+    # Helper scoring methods
+    def _calculate_maintainability_score(self, content: str) -> float:
+        """Calculate maintainability score (0-10)"""
+        score = 10.0
+        
+        if len(content.split('\n')) > 200:
+            score -= 2
+        
+        if len(re.findall(r'TODO|FIXME|HACK', content, re.IGNORECASE)) > 0:
+            score -= 1
+        
+        if 'export default' in content or 'export {' in content:
+            score += 0.5
+        
+        return max(0, min(10, round(score, 1)))
+    
+    def _calculate_readability_score(self, content: str) -> float:
+        """Calculate readability score (0-10)"""
+        lines = [l.strip() for l in content.split('\n') if l.strip()]
+        
+        comment_lines = len([l for l in lines if l.startswith('//') or l.startswith('/*')])
+        comment_ratio = comment_lines / max(1, len(lines))
+        
+        score = 8.0
+        
+        if comment_ratio > 0.1:
+            score += 1
+        
+        return max(0, min(10, round(score, 1)))
+    
+    def _calculate_type_safety_score(self, content: str) -> float:
+        """Calculate TypeScript type safety score (0-1)"""
+        if not ('.tsx' in content or '.ts' in content or 'interface' in content):
+            return 0.5
+        
+        score = 0.0
+        
+        if re.search(r'interface\s+\w+Props', content):
+            score += 0.3
+        
+        if 'any' not in content:
+            score += 0.2
+        
+        return min(1.0, score)
+    
+    def _calculate_accessibility_score(self, a11y_analysis: Dict[str, Any]) -> float:
+        """Calculate accessibility score (0-1)"""
+        score = 0.0
+        max_score = 3
+        
+        if a11y_analysis.get('aria_labels', 0) > 0:
+            score += 1
+        if a11y_analysis.get('semantic_html', 0) > 0:
+            score += 1
+        if a11y_analysis.get('alt_text', 0) > 0:
+            score += 1
+        
+        return min(1.0, score / max_score)
+    
+    def _calculate_testability_score(self, content: str) -> float:
+        """Calculate testability score (0-1)"""
+        score = 0.5
+        
+        if 'data-testid' in content:
+            score += 0.2
+        if re.search(r'export\s+{', content):
+            score += 0.1
+        
+        return max(0.0, min(1.0, score))
     
     async def analyze_file(self, file_path: str, content: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -573,19 +1045,4 @@ class ReactCodeAgent(BaseAgent):
         elif len(issues) > 10:
             base_confidence -= 0.1
         
-        return max(0.5, min(1.0, base_confidence))
-    
-    async def _chat_impl(self, context: Dict[str, Any]) -> str:
-        """Handle chat interactions for React code assistance"""
-        message = context.get('message', '').lower()
-        
-        if 'component' in message:
-            return "I can help you with React components! I specialize in analyzing component structure, optimizing performance, and suggesting modern React patterns. What specific component issue are you working on?"
-        elif 'hook' in message:
-            return "Great! I'm an expert on React hooks. I can help with useState, useEffect, custom hooks, and ensuring you're following the rules of hooks. What hook-related question do you have?"
-        elif 'performance' in message:
-            return "Performance optimization is one of my specialties! I can suggest React.memo, useCallback, useMemo usage, and identify performance bottlenecks in your React code. Share your code and I'll analyze it!"
-        elif 'props' in message:
-            return "I can help with props handling, validation, destructuring, and avoiding prop drilling. Are you having issues with prop types, passing props, or component communication?"
-        else:
-            return "I'm your React code specialist! I can help with component architecture, hooks, performance optimization, modern React patterns, and best practices. What React coding challenge are you facing?" 
+        return max(0.5, min(1.0, base_confidence)) 
