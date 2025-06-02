@@ -8,6 +8,7 @@ and Node.js performance optimization.
 
 import re
 import json
+import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -19,6 +20,11 @@ class NodeCodeAgent(BaseAgent):
     Specialized agent for Node.js backend development and analysis.
     Focuses on Express.js, APIs, middleware, async patterns, and performance.
     """
+    
+    def __init__(self, config: Dict[str, Any], logger, prompt_loader=None):
+        """Initialize NodeCodeAgent with optional PromptLoader"""
+        super().__init__(config, logger)
+        self.prompt_loader = prompt_loader
     
     def _initialize(self):
         """Initialize Node Code Agent with specialized configuration"""
@@ -712,20 +718,130 @@ class NodeCodeAgent(BaseAgent):
         return max(0.5, min(1.0, base_confidence))
     
     async def _chat_impl(self, context: Dict[str, Any]) -> str:
-        """Handle chat interactions for Node.js code assistance"""
-        message = context.get('message', '').lower()
+        """
+        Node.js agent chat implementation using PromptLoader.
         
-        if 'express' in message:
-            return "I'm an Express.js expert! I can help with routing, middleware, security, error handling, API design, and performance optimization. What Express challenge are you working on?"
-        elif 'async' in message or 'promise' in message:
-            return "Asynchronous programming in Node.js is my specialty! I can help with async/await patterns, promise handling, error management, and avoiding callback hell. What async issue are you facing?"
-        elif 'api' in message:
-            return "API development is what I do best! I can help with RESTful design, GraphQL, authentication, validation, rate limiting, and API security. What API feature are you building?"
-        elif 'performance' in message:
-            return "Node.js performance optimization is crucial! I can help with clustering, caching, database optimization, memory management, and identifying bottlenecks. What performance issue do you have?"
-        elif 'security' in message:
-            return "Node.js security is critical! I can help with authentication, authorization, input validation, SQL injection prevention, XSS protection, and secure coding practices. What security concern do you have?"
-        elif 'middleware' in message:
-            return "Middleware is the backbone of Express apps! I can help with custom middleware, security middleware, error handling, body parsing, and middleware order. What middleware question do you have?"
+        Args:
+            context: Chat context including message, file info, and conversation history
+            
+        Returns:
+            Helpful Node.js-specific response from PromptLoader
+        """
+        user_message = context.get('user_message', context.get('message', ''))
+        file_path = context.get('file_path', '')
+        file_content = context.get('file_content', context.get('content', ''))
+        conversation_history = context.get('conversation_history', [])
+        
+        self.logger.info(f"🟢 NODE CHAT: Processing message: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'")
+        
+        # Use PromptLoader if available (should be injected via constructor)
+        if hasattr(self, 'prompt_loader') and self.prompt_loader:
+            self.logger.info(f"📚 NODE CHAT: Using PromptLoader for enhanced response")
+            
+            # Build enhanced context for PromptLoader
+            enhanced_context = {
+                'user_message': user_message,
+                'selected_file': {
+                    'path': file_path,
+                    'content': file_content,
+                    'language': 'javascript'
+                } if file_content else None,
+                'conversation_history': conversation_history,
+                'chat_mode': True,
+                'agent_type': 'node_code'
+            }
+            
+            # Get enhanced prompt with context
+            enhanced_prompt = self.prompt_loader.get_enhanced_prompt('node_code', enhanced_context)
+            
+            # Use the enhanced prompt to provide contextual guidance
+            response = await self._generate_response_with_prompt_loader(
+                user_message, enhanced_context, enhanced_prompt
+            )
+            
+            self.logger.info(f"✅ NODE CHAT: Generated enhanced response ({len(response)} characters)")
+            return response
         else:
-            return "I'm your Node.js backend specialist! I can help with Express.js, API development, async programming, security, performance optimization, middleware, and modern Node.js patterns. What Node.js challenge can I help you solve?" 
+            # Fallback to basic response if no PromptLoader
+            self.logger.warning(f"⚠️ NODE CHAT: No PromptLoader available, using basic response")
+            return await self._generate_basic_chat_response(user_message, file_path, file_content)
+    
+    async def _generate_response_with_prompt_loader(
+        self, 
+        user_message: str, 
+        context: Dict[str, Any], 
+        enhanced_prompt: str
+    ) -> str:
+        """Generate response using PromptLoader and enhanced context via Vertex AI."""
+        
+        try:
+            # Import here to avoid circular imports
+            from ....integrations.vertex_ai_client import VertexAIClient
+            
+            # Initialize Vertex AI client (reuse from service if available)
+            # Use config.get() method to properly read from environment variables
+            project_id = self.config.get('project_id') if hasattr(self.config, 'get') else os.getenv('GCP_PROJECT_ID')
+            region = self.config.get('region', 'us-central1') if hasattr(self.config, 'get') else 'us-central1'
+            
+            vertex_client = VertexAIClient(
+                project_id=project_id,
+                location=region,
+                model_name=None,  # Will read from GEMINI_MODEL env var
+            )
+            
+            self.logger.info(f"🤖 NODE CHAT: Using Vertex AI with model: {vertex_client.model_name}")
+            self.logger.info(f"📏 NODE CHAT: Enhanced prompt length: {len(enhanced_prompt)} characters")
+            
+            # Use the enhanced prompt with Vertex AI
+            response = await vertex_client.chat_with_context(
+                message=user_message,
+                enhanced_prompt=enhanced_prompt,
+                conversation_history=context.get('conversation_history', [])
+            )
+            
+            self.logger.info(f"✅ NODE CHAT: Vertex AI response received")
+            
+            # Extract text from response
+            if isinstance(response, dict):
+                text_response = response.get('text') or response.get('response') or response.get('content')
+                if text_response:
+                    self.logger.info(f"📝 NODE CHAT: Returning AI-generated response ({len(text_response)} characters)")
+                    return text_response
+                else:
+                    error_msg = response.get('error', 'Unknown error')
+                    self.logger.error(f"❌ NODE CHAT: No text in AI response - Error: {error_msg}")
+                    return await self._generate_basic_chat_response(user_message, context.get('selected_file', {}).get('path', ''), context.get('selected_file', {}).get('content', ''))
+            else:
+                self.logger.error(f"❌ NODE CHAT: Unexpected response format: {type(response)}")
+                return await self._generate_basic_chat_response(user_message, context.get('selected_file', {}).get('path', ''), context.get('selected_file', {}).get('content', ''))
+                
+        except Exception as e:
+            self.logger.error(f"❌ NODE CHAT: Error using PromptLoader with Vertex AI: {e}")
+            # Fall back to basic response
+            return await self._generate_basic_chat_response(
+                user_message, 
+                context.get('selected_file', {}).get('path', ''), 
+                context.get('selected_file', {}).get('content', '')
+            )
+    
+    async def _generate_basic_chat_response(
+        self, 
+        user_message: str, 
+        file_path: str, 
+        file_content: str
+    ) -> str:
+        """Basic fallback response when PromptLoader is not available."""
+        
+        return f"""## Node.js Development Assistant
+
+I'm your Node.js backend specialist. I can help with:
+
+- Express.js and API development
+- Async programming and performance
+- Database integration and optimization
+- Security and authentication
+- Modern JavaScript patterns
+
+{f"Currently analyzing: `{file_path}`" if file_path else ""}
+
+What Node.js challenge can I help you solve?""" 

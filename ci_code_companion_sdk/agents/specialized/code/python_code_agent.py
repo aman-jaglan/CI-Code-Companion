@@ -8,6 +8,7 @@ optimization, and framework-specific recommendations.
 
 import re
 import ast
+import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -19,6 +20,11 @@ class PythonCodeAgent(BaseAgent):
     Specialized agent for Python code development and analysis.
     Focuses on Python syntax, patterns, performance, and framework best practices.
     """
+    
+    def __init__(self, config: Dict[str, Any], logger, prompt_loader=None):
+        """Initialize PythonCodeAgent with optional PromptLoader"""
+        super().__init__(config, logger)
+        self.prompt_loader = prompt_loader
     
     def _initialize(self):
         """Initialize Python Code Agent with specialized configuration"""
@@ -718,18 +724,130 @@ class PythonCodeAgent(BaseAgent):
         return max(0.5, min(1.0, base_confidence))
     
     async def _chat_impl(self, context: Dict[str, Any]) -> str:
-        """Handle chat interactions for Python code assistance"""
-        message = context.get('message', '').lower()
+        """
+        Python agent chat implementation using PromptLoader.
         
-        if 'performance' in message:
-            return "I can help optimize your Python code! I specialize in identifying performance bottlenecks, suggesting list comprehensions, optimizing loops, and recommending efficient data structures. What performance issue are you facing?"
-        elif 'django' in message:
-            return "Django development is my specialty! I can help with models, views, ORM optimization, avoiding N+1 queries, security best practices, and Django-specific patterns. What Django challenge are you working on?"
-        elif 'flask' in message:
-            return "I'm experienced with Flask development! I can assist with routing, templates, extensions, security configurations, and API development. What Flask topic do you need help with?"
-        elif 'async' in message or 'asyncio' in message:
-            return "Asynchronous Python programming is powerful! I can help with async/await patterns, asyncio best practices, concurrent programming, and performance optimization for async code. What async challenge are you facing?"
-        elif 'type' in message and 'hint' in message:
-            return "Type hints make Python code much better! I can help you add proper type annotations, work with generics, handle complex types, and use mypy for type checking. What typing question do you have?"
+        Args:
+            context: Chat context including message, file info, and conversation history
+            
+        Returns:
+            Helpful Python-specific response from PromptLoader
+        """
+        user_message = context.get('user_message', context.get('message', ''))
+        file_path = context.get('file_path', '')
+        file_content = context.get('file_content', context.get('content', ''))
+        conversation_history = context.get('conversation_history', [])
+        
+        self.logger.info(f"🐍 PYTHON CHAT: Processing message: '{user_message[:100]}{'...' if len(user_message) > 100 else ''}'")
+        
+        # Use PromptLoader if available (should be injected via constructor)
+        if hasattr(self, 'prompt_loader') and self.prompt_loader:
+            self.logger.info(f"📚 PYTHON CHAT: Using PromptLoader for enhanced response")
+            
+            # Build enhanced context for PromptLoader
+            enhanced_context = {
+                'user_message': user_message,
+                'selected_file': {
+                    'path': file_path,
+                    'content': file_content,
+                    'language': 'python'
+                } if file_content else None,
+                'conversation_history': conversation_history,
+                'chat_mode': True,
+                'agent_type': 'python_code'
+            }
+            
+            # Get enhanced prompt with context
+            enhanced_prompt = self.prompt_loader.get_enhanced_prompt('python_code', enhanced_context)
+            
+            # Use the enhanced prompt to provide contextual guidance
+            response = await self._generate_response_with_prompt_loader(
+                user_message, enhanced_context, enhanced_prompt
+            )
+            
+            self.logger.info(f"✅ PYTHON CHAT: Generated enhanced response ({len(response)} characters)")
+            return response
         else:
-            return "I'm your Python code specialist! I can help with performance optimization, framework best practices (Django, Flask, FastAPI), code structure, modern Python patterns, type hints, and debugging. What Python coding challenge can I help you solve?" 
+            # Fallback to basic response if no PromptLoader
+            self.logger.warning(f"⚠️ PYTHON CHAT: No PromptLoader available, using basic response")
+            return await self._generate_basic_chat_response(user_message, file_path, file_content)
+    
+    async def _generate_response_with_prompt_loader(
+        self, 
+        user_message: str, 
+        context: Dict[str, Any], 
+        enhanced_prompt: str
+    ) -> str:
+        """Generate response using PromptLoader and enhanced context via Vertex AI."""
+        
+        try:
+            # Import here to avoid circular imports
+            from ....integrations.vertex_ai_client import VertexAIClient
+            
+            # Initialize Vertex AI client (reuse from service if available)
+            # Use config.get() method to properly read from environment variables
+            project_id = self.config.get('project_id') if hasattr(self.config, 'get') else os.getenv('GCP_PROJECT_ID')
+            region = self.config.get('region', 'us-central1') if hasattr(self.config, 'get') else 'us-central1'
+            
+            vertex_client = VertexAIClient(
+                project_id=project_id,
+                location=region,
+                model_name=None,  # Will read from GEMINI_MODEL env var
+            )
+            
+            self.logger.info(f"🤖 PYTHON CHAT: Using Vertex AI with model: {vertex_client.model_name}")
+            self.logger.info(f"📏 PYTHON CHAT: Enhanced prompt length: {len(enhanced_prompt)} characters")
+            
+            # Use the enhanced prompt with Vertex AI
+            response = await vertex_client.chat_with_context(
+                message=user_message,
+                enhanced_prompt=enhanced_prompt,
+                conversation_history=context.get('conversation_history', [])
+            )
+            
+            self.logger.info(f"✅ PYTHON CHAT: Vertex AI response received")
+            
+            # Extract text from response
+            if isinstance(response, dict):
+                text_response = response.get('text') or response.get('response') or response.get('content')
+                if text_response:
+                    self.logger.info(f"📝 PYTHON CHAT: Returning AI-generated response ({len(text_response)} characters)")
+                    return text_response
+                else:
+                    error_msg = response.get('error', 'Unknown error')
+                    self.logger.error(f"❌ PYTHON CHAT: No text in AI response - Error: {error_msg}")
+                    return await self._generate_basic_chat_response(user_message, context.get('selected_file', {}).get('path', ''), context.get('selected_file', {}).get('content', ''))
+            else:
+                self.logger.error(f"❌ PYTHON CHAT: Unexpected response format: {type(response)}")
+                return await self._generate_basic_chat_response(user_message, context.get('selected_file', {}).get('path', ''), context.get('selected_file', {}).get('content', ''))
+                
+        except Exception as e:
+            self.logger.error(f"❌ PYTHON CHAT: Error using PromptLoader with Vertex AI: {e}")
+            # Fall back to basic response
+            return await self._generate_basic_chat_response(
+                user_message, 
+                context.get('selected_file', {}).get('path', ''), 
+                context.get('selected_file', {}).get('content', '')
+            )
+    
+    async def _generate_basic_chat_response(
+        self, 
+        user_message: str, 
+        file_path: str, 
+        file_content: str
+    ) -> str:
+        """Basic fallback response when PromptLoader is not available."""
+        
+        return f"""## Python Development Assistant
+
+I'm your Python specialist. I can help with:
+
+- Code analysis and best practices
+- Web frameworks (Django, Flask, FastAPI)
+- Performance optimization
+- Security improvements
+- Modern Python patterns
+
+{f"Currently analyzing: `{file_path}`" if file_path else ""}
+
+What Python challenge can I help you solve?""" 
