@@ -19,7 +19,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / 'web_dashboard'))
 
 # Import new SDK
-from ci_code_companion_sdk import CICodeCompanionEngine, SDKConfig
+from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
 from ci_code_companion_sdk.core.exceptions import CICodeCompanionError, ConfigurationError
 from web_dashboard.routes.api import api, init_database
 from web_dashboard.routes.gitlab_api import gitlab_bp, init_gitlab
@@ -47,24 +47,12 @@ def create_app():
     
     # Initialize SDK
     try:
-        sdk = CICodeCompanionEngine()
+        sdk = CICodeCompanionSDK()
         logger.info("CI Code Companion SDK initialized successfully")
         app.sdk = sdk
     except Exception as e:
         logger.error(f"Failed to initialize SDK: {e}")
         app.sdk = None
-    
-    # Initialize enhanced system on startup
-    with app.app_context():
-        from web_dashboard.routes.api import initialize_enhanced_system
-        try:
-            enhanced_init_success = initialize_enhanced_system()
-            if enhanced_init_success:
-                logger.info("Enhanced system with Vertex AI initialized successfully")
-            else:
-                logger.warning("Enhanced system initialization failed, falling back to basic functionality")
-        except Exception as e:
-            logger.error(f"Enhanced system initialization error: {e}")
     
     # Register blueprints
     from web_dashboard.routes.api import api

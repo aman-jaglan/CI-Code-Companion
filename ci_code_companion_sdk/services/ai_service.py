@@ -2,7 +2,7 @@
 Streamlined AI Service
 
 This module provides a direct interface to AI models and agents for code analysis, chat, and generation tasks.
-Integrates with the agent system while eliminating unnecessary abstraction layers.
+Integrates with the specialized agent system while eliminating unnecessary abstraction layers.
 """
 
 import asyncio
@@ -60,21 +60,24 @@ class StreamlinedAIService:
         # Initialize specialized agents for chat and analysis
         self.agents = {}
         try:
+            # Initialize agents with proper parameters
+            agent_config = config.to_dict() if hasattr(config, 'to_dict') else {}
+            
             self.agents['react'] = ReactCodeAgent(
-                config=config.to_dict() if hasattr(config, 'to_dict') else {},
+                config=agent_config,
                 logger=self.logger.getChild('react_agent')
             )
             self.agents['python'] = PythonCodeAgent(
-                config=config.to_dict() if hasattr(config, 'to_dict') else {},
+                config=agent_config,
                 logger=self.logger.getChild('python_agent')
             )
             self.agents['node'] = NodeCodeAgent(
-                config=config.to_dict() if hasattr(config, 'to_dict') else {},
+                config=agent_config,
                 logger=self.logger.getChild('node_agent')
             )
-            self.logger.info(f"Initialized {len(self.agents)} specialized agents")
+            self.logger.info(f"✅ AGENTS INITIALIZED: Successfully initialized {len(self.agents)} specialized agents")
         except Exception as e:
-            self.logger.warning(f"Failed to initialize some agents: {e}")
+            self.logger.error(f"❌ AGENT INITIALIZATION FAILED: {e}")
             self.agents = {}
     
     def _detect_agent_type(self, file_path: str, content: str) -> str:

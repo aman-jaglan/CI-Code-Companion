@@ -75,17 +75,10 @@ class AgentManager:
     def _initialize_builtin_agents(self):
         """
         Initialize and register built-in agents.
-        Note: This agent manager is deprecated in favor of specialized agents.
-        Use SpecializedEngine and AgentOrchestrator for new implementations.
+        Note: Specialized agents are now handled by StreamlinedAIService.
+        This AgentManager is maintained for backward compatibility.
         """
-        # Legacy agent manager - specialized agents are handled by AgentOrchestrator
-        # This is maintained for backward compatibility only
-        
-        self.logger.warning(
-            "Using legacy AgentManager. Consider migrating to SpecializedEngine "
-            "with AgentOrchestrator for better performance and functionality."
-        )
-        
+        # Legacy agent manager - specialized agents are handled by StreamlinedAIService
         # No builtin agents - all functionality moved to specialized agents
         builtin_agents = {}
         
