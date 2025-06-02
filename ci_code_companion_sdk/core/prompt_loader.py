@@ -2,7 +2,7 @@
 Prompt Loader for CI Code Companion SDK
 
 This module provides dynamic prompt loading and context injection for specialized agents,
-following Cursor's approach to structured system prompts with context awareness.
+following approach to structured system prompts with context awareness.
 """
 
 import os
@@ -17,7 +17,7 @@ from .config import SDKConfig
 class PromptLoader:
     """
     Dynamic prompt loader with context injection for specialized agents.
-    Supports Cursor-style prompt enhancement with project context, conversation history,
+    Supports prompt enhancement with project context, conversation history,
     and file-specific information.
     """
     

@@ -16,6 +16,7 @@ from ..agents.specialized.code.react_code_agent import ReactCodeAgent
 from ..agents.specialized.code.python_code_agent import PythonCodeAgent
 from ..agents.specialized.code.node_code_agent import NodeCodeAgent
 from ..core.config import SDKConfig
+from ..core.prompt_loader import PromptLoader
 from ..core.exceptions import AnalysisError, ConfigurationError
 from ..models.analysis_model import AnalysisResult, TestGenerationResult, OptimizationResult
 
@@ -40,7 +41,7 @@ class StreamlinedAIService:
         # Initialize Vertex AI client directly
         try:
             self.vertex_client = VertexAIClient(
-                project_id=config.get('project_id', 'ci-code-companion-app'),
+                project_id=config.get('project_id'),
                 location=config.get('region', 'us-central1'),
                 model_name=None,  # Will read from GEMINI_MODEL env var
             )
@@ -60,25 +61,33 @@ class StreamlinedAIService:
         # Initialize specialized agents for chat and analysis
         self.agents = {}
         try:
-            # Initialize agents with proper parameters
+            # Initialize PromptLoader for enhanced agent capabilities
+            self.prompt_loader = PromptLoader(config, self.logger.getChild('prompt_loader'))
+            self.logger.info(f"📚 PROMPT LOADER: Successfully initialized PromptLoader")
+            
+            # Initialize agents with proper parameters including PromptLoader
             agent_config = config.to_dict() if hasattr(config, 'to_dict') else {}
             
             self.agents['react'] = ReactCodeAgent(
                 config=agent_config,
-                logger=self.logger.getChild('react_agent')
+                logger=self.logger.getChild('react_agent'),
+                prompt_loader=self.prompt_loader
             )
             self.agents['python'] = PythonCodeAgent(
                 config=agent_config,
-                logger=self.logger.getChild('python_agent')
+                logger=self.logger.getChild('python_agent'),
+                prompt_loader=self.prompt_loader
             )
             self.agents['node'] = NodeCodeAgent(
                 config=agent_config,
-                logger=self.logger.getChild('node_agent')
+                logger=self.logger.getChild('node_agent'),
+                prompt_loader=self.prompt_loader
             )
-            self.logger.info(f"✅ AGENTS INITIALIZED: Successfully initialized {len(self.agents)} specialized agents")
+            self.logger.info(f"✅ AGENTS INITIALIZED: Successfully initialized {len(self.agents)} specialized agents with PromptLoader")
         except Exception as e:
             self.logger.error(f"❌ AGENT INITIALIZATION FAILED: {e}")
             self.agents = {}
+            self.prompt_loader = None
     
     def _detect_agent_type(self, file_path: str, content: str) -> str:
         """Detect the appropriate agent based on file and content."""
