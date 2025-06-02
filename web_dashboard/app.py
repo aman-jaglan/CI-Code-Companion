@@ -80,20 +80,24 @@ try:
     from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
     from ci_code_companion_sdk.core.exceptions import SDKError, AnalysisError, ConfigurationError
     
-    # Initialize SDK
-    sdk_config = SDKConfig(
-        ai_provider=os.getenv('AI_PROVIDER', 'vertex_ai'),
-        project_id=os.getenv('GCP_PROJECT_ID'),
-        region=os.getenv('GCP_REGION', 'us-central1'),
-        enable_caching=True,
-        max_concurrent_operations=5
-    )
+    # Initialize SDK with streamlined configuration
+    sdk_config = SDKConfig({
+        'ai_provider': 'vertex_ai',
+        'project_id': os.getenv('GCP_PROJECT_ID'),
+        'region': os.getenv('GCP_REGION', 'us-central1'),
+        'enable_caching': True,
+        'max_workers': 3  # Reduced for better resource management
+    })
     
     ci_sdk = CICodeCompanionSDK(config=sdk_config)
-    logger.info("CI Code Companion SDK initialized successfully")
+    logger.info(f"CI Code Companion SDK initialized successfully with model: {ci_sdk.ai_service.vertex_client.model_name}")
     
 except ImportError as e:
     logger.error(f"Failed to import CI Code Companion SDK: {e}")
+    ci_sdk = None
+except ConfigurationError as e:
+    logger.error(f"SDK configuration error: {e}")
+    logger.error(f"Suggestions: {e.suggestions}")
     ci_sdk = None
 except Exception as e:
     logger.error(f"Failed to initialize CI Code Companion SDK: {e}")
@@ -367,45 +371,54 @@ def project_selector():
 
 @app.route('/ai/review-file', methods=['POST'])
 def review_file_ai():
-    """AI-powered file review using CI Code Companion SDK"""
+    """Streamlined AI-powered file review using direct AI service"""
+    logger.info("🌐 ENDPOINT HIT: /ai/review-file - File review request received")
+    
     if not ci_sdk:
+        logger.error("❌ SDK ERROR: CI Code Companion SDK not available")
         return jsonify({
             "success": False,
-            "error": "CI Code Companion SDK not available"
+            "error": "CI Code Companion SDK not available. Check configuration and model setup."
         }), 500
     
     try:
         data = request.get_json()
         code = data.get('code', '')
         file_path = data.get('file_path', 'unknown.py')
+        analysis_type = data.get('analysis_type', 'comprehensive')
+        
+        logger.info(f"📋 REQUEST DATA: File: {file_path}, Analysis: {analysis_type}, Code length: {len(code)}")
         
         if not code:
+            logger.warning("⚠️ VALIDATION: No code provided for review")
             return jsonify({
                 "success": False,
                 "error": "No code provided for review"
             }), 400
         
-        # Analyze file using SDK
-        result = run_async(ci_sdk.analyze_file(file_path, code))
+        logger.info("🚀 SDK CALL: Calling ci_sdk.analyze_file() → StreamlinedAIService")
         
-        # Format for review response
+        # Analyze file using streamlined SDK
+        result = run_async(ci_sdk.analyze_file(file_path, code, analysis_type=analysis_type))
+        
+        logger.info(f"✅ SDK RESPONSE: Analysis completed successfully")
+        logger.info(f"📊 RESULTS: Found {len(result.issues)} issues, {len(result.suggestions)} suggestions")
+        
+        # Convert result to expected format
         review_response = {
             "success": True,
-            "review": {
-                "overall_score": result.calculate_quality_score(),
-                "agent_used": result.agent_type,
-                "confidence": result.confidence_score,
-                "critical_issues": len(result.get_critical_issues()),
-                "total_issues": len(result.issues),
+            "analysis": {
+                "operation_id": result.operation_id,
+                "file_path": result.file_path,
+                "confidence_score": result.confidence_score,
+                "model_used": result.metadata.get('model_used', 'unknown'),
                 "issues": [
                     {
-                        "severity": issue.severity,
-                        "category": issue.category,
                         "title": issue.title,
                         "description": issue.description,
-                        "line": issue.line_number,
-                        "suggestion": issue.suggestion,
-                        "auto_fixable": issue.is_auto_fixable()
+                        "severity": issue.severity,
+                        "line_number": issue.line_number,
+                        "suggestion": issue.suggestion
                     } for issue in result.issues
                 ],
                 "suggestions": [
@@ -418,22 +431,39 @@ def review_file_ai():
             }
         }
         
+        logger.info("🎉 RESPONSE: Sending successful analysis response to UI")
         return jsonify(review_response)
         
-    except Exception as e:
-        logger.error(f"Error in file review: {str(e)}")
+    except ConfigurationError as e:
+        logger.error(f"⚙️ CONFIG ERROR: Configuration error in file review: {e}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Configuration error: {e.message}",
+            "suggestions": e.suggestions
+        }), 500
+    except AnalysisError as e:
+        logger.error(f"🔍 ANALYSIS ERROR: Analysis error in file review: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"AI analysis error: {e.message}"
+        }), 500
+    except Exception as e:
+        logger.error(f"💥 UNEXPECTED ERROR: Unexpected error in file review: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}"
         }), 500
 
 @app.route('/ai/generate-tests', methods=['POST'])
 def generate_tests_ai():
-    """AI-powered test generation using CI Code Companion SDK"""
+    """Streamlined AI-powered test generation using direct AI service"""
+    logger.info("🌐 ENDPOINT HIT: /ai/generate-tests - Test generation request received")
+    
     if not ci_sdk:
+        logger.error("❌ SDK ERROR: CI Code Companion SDK not available")
         return jsonify({
             "success": False,
-            "error": "CI Code Companion SDK not available"
+            "error": "CI Code Companion SDK not available. Check configuration and model setup."
         }), 500
     
     try:
@@ -442,34 +472,67 @@ def generate_tests_ai():
         file_path = data.get('file_path', 'unknown.py')
         test_type = data.get('test_type', 'unit')
         
+        logger.info(f"📋 REQUEST DATA: File: {file_path}, Test type: {test_type}, Code length: {len(code)}")
+        
         if not code:
+            logger.warning("⚠️ VALIDATION: No code provided for test generation")
             return jsonify({
                 "success": False,
                 "error": "No code provided for test generation"
             }), 400
         
-        # Generate tests using SDK
+        logger.info("🚀 SDK CALL: Calling ci_sdk.generate_tests() → StreamlinedAIService")
+        
+        # Generate tests using streamlined SDK
         result = run_async(ci_sdk.generate_tests(file_path, code, test_type=test_type))
         
-        return jsonify({
-            "success": True,
-            "tests": result
-        })
+        logger.info(f"✅ SDK RESPONSE: Test generation completed successfully")
+        logger.info(f"📝 TEST CODE: Generated {len(result.test_code)} characters of test code")
         
-    except Exception as e:
-        logger.error(f"Error in test generation: {str(e)}")
+        response_data = {
+            "success": True,
+            "tests": {
+                "operation_id": result.operation_id,
+                "test_code": result.test_code,
+                "test_type": result.test_type,
+                "coverage_estimate": result.coverage_estimate,
+                "model_used": result.metadata.get('model_used', 'unknown')
+            }
+        }
+        
+        logger.info("🎉 RESPONSE: Sending successful test generation response to UI")
+        return jsonify(response_data)
+        
+    except ConfigurationError as e:
+        logger.error(f"⚙️ CONFIG ERROR: Configuration error in test generation: {e}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Configuration error: {e.message}",
+            "suggestions": e.suggestions
+        }), 500
+    except AnalysisError as e:
+        logger.error(f"🔍 ANALYSIS ERROR: Analysis error in test generation: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"AI analysis error: {e.message}"
+        }), 500
+    except Exception as e:
+        logger.error(f"💥 UNEXPECTED ERROR: Unexpected error in test generation: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}"
         }), 500
 
 @app.route('/ai/optimize-code', methods=['POST'])
 def optimize_code_ai():
-    """AI-powered code optimization using CI Code Companion SDK"""
+    """Streamlined AI-powered code optimization using direct AI service"""
+    logger.info("🌐 ENDPOINT HIT: /ai/optimize-code - Code optimization request received")
+    
     if not ci_sdk:
+        logger.error("❌ SDK ERROR: CI Code Companion SDK not available")
         return jsonify({
             "success": False,
-            "error": "CI Code Companion SDK not available"
+            "error": "CI Code Companion SDK not available. Check configuration and model setup."
         }), 500
     
     try:
@@ -478,34 +541,67 @@ def optimize_code_ai():
         file_path = data.get('file_path', 'unknown.py')
         optimization_type = data.get('optimization_type', 'performance')
         
+        logger.info(f"📋 REQUEST DATA: File: {file_path}, Optimization: {optimization_type}, Code length: {len(code)}")
+        
         if not code:
+            logger.warning("⚠️ VALIDATION: No code provided for optimization")
             return jsonify({
                 "success": False,
                 "error": "No code provided for optimization"
             }), 400
         
-        # Optimize code using SDK
+        logger.info("🚀 SDK CALL: Calling ci_sdk.optimize_code() → StreamlinedAIService")
+        
+        # Optimize code using streamlined SDK
         result = run_async(ci_sdk.optimize_code(file_path, code, optimization_type=optimization_type))
         
-        return jsonify({
-            "success": True,
-            "optimization": result
-        })
+        logger.info(f"✅ SDK RESPONSE: Code optimization completed successfully")
+        logger.info(f"⚡ OPTIMIZED CODE: Generated {len(result.optimized_code)} characters of optimized code")
         
-    except Exception as e:
-        logger.error(f"Error in code optimization: {str(e)}")
+        response_data = {
+            "success": True,
+            "optimization": {
+                "operation_id": result.operation_id,
+                "optimized_code": result.optimized_code,
+                "optimization_type": result.optimization_type,
+                "performance_impact": result.performance_impact,
+                "model_used": result.metadata.get('model_used', 'unknown')
+            }
+        }
+        
+        logger.info("🎉 RESPONSE: Sending successful optimization response to UI")
+        return jsonify(response_data)
+        
+    except ConfigurationError as e:
+        logger.error(f"⚙️ CONFIG ERROR: Configuration error in code optimization: {e}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Configuration error: {e.message}",
+            "suggestions": e.suggestions
+        }), 500
+    except AnalysisError as e:
+        logger.error(f"🔍 ANALYSIS ERROR: Analysis error in code optimization: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"AI analysis error: {e.message}"
+        }), 500
+    except Exception as e:
+        logger.error(f"💥 UNEXPECTED ERROR: Unexpected error in code optimization: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}"
         }), 500
 
 @app.route('/ai/chat', methods=['POST'])
 def chat_ai():
-    """AI chat functionality using CI Code Companion SDK"""
+    """Streamlined AI chat functionality using direct AI service"""
+    logger.info("🌐 ENDPOINT HIT: /ai/chat - Chat request received")
+    
     if not ci_sdk:
+        logger.error("❌ SDK ERROR: CI Code Companion SDK not available")
         return jsonify({
             "success": False,
-            "error": "CI Code Companion SDK not available"
+            "error": "CI Code Companion SDK not available. Check configuration and model setup."
         }), 500
     
     try:
@@ -515,13 +611,20 @@ def chat_ai():
         content = data.get('content')
         conversation_history = data.get('conversation_history', [])
         
+        logger.info(f"💬 CHAT REQUEST: Message: '{message[:50]}{'...' if len(message) > 50 else ''}'")
+        logger.info(f"📁 CHAT CONTEXT: File: {file_path if file_path else 'None'}")
+        logger.info(f"📚 CHAT HISTORY: {len(conversation_history)} previous messages")
+        
         if not message:
+            logger.warning("⚠️ VALIDATION: No message provided")
             return jsonify({
                 "success": False,
                 "error": "No message provided"
             }), 400
         
-        # Chat using SDK
+        logger.info("🚀 SDK CALL: Calling ci_sdk.chat() → StreamlinedAIService")
+        
+        # Chat using streamlined SDK
         response = run_async(ci_sdk.chat(
             message=message,
             file_path=file_path,
@@ -529,16 +632,36 @@ def chat_ai():
             conversation_history=conversation_history
         ))
         
-        return jsonify({
-            "success": True,
-            "response": response
-        })
+        logger.info(f"✅ SDK RESPONSE: Chat completed successfully")
+        logger.info(f"📝 CHAT RESPONSE: Response length: {len(response)} characters")
         
-    except Exception as e:
-        logger.error(f"Error in AI chat: {str(e)}")
+        chat_response = {
+            "success": True,
+            "response": response,
+            "model_used": ci_sdk.ai_service.vertex_client.model_name if ci_sdk.ai_service else "unknown"
+        }
+        
+        logger.info("🎉 RESPONSE: Sending successful chat response to UI")
+        return jsonify(chat_response)
+        
+    except ConfigurationError as e:
+        logger.error(f"⚙️ CONFIG ERROR: Configuration error in AI chat: {e}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Configuration error: {e.message}",
+            "suggestions": e.suggestions
+        }), 500
+    except AnalysisError as e:
+        logger.error(f"🔍 ANALYSIS ERROR: Analysis error in AI chat: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"AI analysis error: {e.message}"
+        }), 500
+    except Exception as e:
+        logger.error(f"💥 UNEXPECTED ERROR: Unexpected error in AI chat: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}"
         }), 500
 
 @app.route('/ai/analyze-directory', methods=['POST'])
@@ -579,29 +702,77 @@ def analyze_directory_ai():
 
 @app.route('/api/sdk-status')
 def sdk_status():
-    """Check CI Code Companion SDK status"""
+    """Check CI Code Companion SDK status with streamlined health check and agent integration"""
     if not ci_sdk:
         return jsonify({
             "available": False,
-            "error": "SDK not initialized"
+            "error": "SDK not initialized. Check configuration and model setup.",
+            "suggestions": [
+                "Verify GEMINI_MODEL environment variable is set",
+                "Check Google Cloud credentials",
+                "Ensure Vertex AI is enabled in your project"
+            ]
         })
     
     try:
         # Get SDK health status
         health = run_async(ci_sdk.health_check())
+        
+        # Get detailed agent information
+        agent_details = {}
+        if hasattr(ci_sdk, 'ai_service') and ci_sdk.ai_service and hasattr(ci_sdk.ai_service, 'agents'):
+            for agent_name, agent in ci_sdk.ai_service.agents.items():
+                try:
+                    capabilities = [cap.value for cap in agent.get_capabilities()]
+                    agent_details[agent_name] = {
+                        "status": "healthy",
+                        "capabilities": capabilities,
+                        "chat_support": "CHAT_SUPPORT" in [cap.value for cap in agent.get_capabilities()],
+                        "supported_files": agent.get_supported_file_types(),
+                        "version": getattr(agent, 'version', '1.0.0')
+                    }
+                except Exception as e:
+                    agent_details[agent_name] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+        
         return jsonify({
             "available": True,
             "health": health,
             "config": {
                 "ai_provider": ci_sdk.config.ai_provider,
-                "project_id": ci_sdk.config.project_id,
-                "region": ci_sdk.config.region
+                "project_id": getattr(ci_sdk.config, 'project_id', None),
+                "region": getattr(ci_sdk.config, 'region', None)
+            },
+            "model_info": {
+                "model_name": ci_sdk.ai_service.vertex_client.model_name if ci_sdk.ai_service else "unknown",
+                "direct_connection": True,
+                "fallback_models": "disabled",  # No more fallback models
+                "context_window": "1M+ tokens"
+            },
+            "agent_integration": {
+                "enabled": True,
+                "total_agents": len(agent_details),
+                "agents": agent_details,
+                "chat_enabled_agents": [name for name, info in agent_details.items() 
+                                      if info.get("chat_support", False)],
+                "flow": "Chatbot → StreamlinedAIService → Agents → VertexAI → Gemini Model"
+            },
+            "architecture": {
+                "streamlined": True,
+                "redundancy_removed": True,
+                "single_model_focus": True,
+                "agent_specialization": True
             }
         })
     except Exception as e:
+        logger.error(f"SDK health check failed: {e}")
         return jsonify({
             "available": True,
-            "error": str(e)
+            "error": str(e),
+            "health": {"status": "unhealthy"},
+            "agent_integration": {"enabled": True, "error": "Health check failed"}
         })
 
 if __name__ == '__main__':

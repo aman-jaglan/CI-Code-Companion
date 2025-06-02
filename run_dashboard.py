@@ -26,29 +26,49 @@ from web_dashboard.routes.gitlab_api import gitlab_bp, init_gitlab
 from web_dashboard.routes.gitlab_routes import gitlab_bp as gitlab_oauth_bp
 
 def create_app():
+    """Create and configure the Flask application"""
     # Initialize Flask app with correct template and static folders
     app = Flask(__name__,
                 template_folder='web_dashboard/templates',
                 static_folder='web_dashboard/static')
     
-    # Configure app
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
-    app.config['DATABASE_URL'] = os.getenv('DATABASE_URL', 'sqlite:///ci_code_companion.db')
+    # Configure Flask
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL', 'sqlite:///ci_code_companion.db')
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Get logger after configuring logging
+    logger = logging.getLogger(__name__)
     
     # Initialize SDK
     try:
-        sdk_config = {}  # Use empty dict - SDKConfig will load from environment
-        sdk = CICodeCompanionEngine(config=sdk_config)
-        app.sdk = sdk  # Attach SDK to app
-        app.logger.info("CI Code Companion SDK initialized successfully")
-    except ConfigurationError as e:
-        app.logger.error(f"SDK configuration error: {str(e)}")
-        app.sdk = None
+        sdk = CICodeCompanionEngine()
+        logger.info("CI Code Companion SDK initialized successfully")
+        app.sdk = sdk
     except Exception as e:
-        app.logger.error(f"Failed to initialize SDK: {str(e)}")
+        logger.error(f"Failed to initialize SDK: {e}")
         app.sdk = None
     
-    # Register API blueprint
+    # Initialize enhanced system on startup
+    with app.app_context():
+        from web_dashboard.routes.api import initialize_enhanced_system
+        try:
+            enhanced_init_success = initialize_enhanced_system()
+            if enhanced_init_success:
+                logger.info("Enhanced system with Vertex AI initialized successfully")
+            else:
+                logger.warning("Enhanced system initialization failed, falling back to basic functionality")
+        except Exception as e:
+            logger.error(f"Enhanced system initialization error: {e}")
+    
+    # Register blueprints
+    from web_dashboard.routes.api import api
+    
     app.register_blueprint(api)
     
     # Register GitLab API blueprint (for file operations)
@@ -69,12 +89,6 @@ def create_app():
             app.logger.error("Failed to initialize GitLab connection")
     else:
         app.logger.warning("GitLab token not found in environment variables")
-    
-    # Configure logging
-    logging.basicConfig(
-        level=logging.DEBUG if app.debug else logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
     
     # Add route for dashboard
     @app.route('/')

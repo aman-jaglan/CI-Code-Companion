@@ -551,13 +551,26 @@ Configure your security scope or ask about security concerns!`;
                         response = await this.sendGeneralChatRequest(inputText);
                 }
                 
+                // Debug logging for response
+                console.log('🔍 FRONTEND DEBUG: Full API response:', response);
+                console.log('🔍 FRONTEND DEBUG: response.response length:', response.response ? response.response.length : 'undefined');
+                console.log('🔍 FRONTEND DEBUG: response.content:', response.content ? 'exists' : 'undefined');
+                console.log('🔍 FRONTEND DEBUG: response.success:', response.success);
+                if (response.metadata) {
+                    console.log('🔍 FRONTEND DEBUG: response.metadata.model:', response.metadata.model);
+                    console.log('🔍 FRONTEND DEBUG: response.metadata.agent:', response.metadata.agent);
+                }
+                
                 const assistantMessage = {
                     id: Date.now(),
                     role: 'assistant',
-                    content: response.content,
+                    content: response.content || response.response || 'No response received',
                     timestamp: new Date(),
-                    actions: response.actions || []
+                    actions: response.actions || [],
+                    metadata: response.metadata || {}
                 };
+                
+                console.log('🎉 FRONTEND DEBUG: Created assistant message with content length:', assistantMessage.content.length);
                 
                 this.chatMessages.push(assistantMessage);
                 
@@ -711,6 +724,8 @@ Configure your security scope or ask about security concerns!`;
             
             switch (action.id) {
                 case 'review-file':
+                case 'review_js':
+                case 'review_python':
                     if (this.selectedFile) {
                         this.sendQuickMessage(`Please review the file ${this.selectedFile.name} for potential issues, improvements, and best practices.`);
                     } else {
@@ -719,35 +734,160 @@ Configure your security scope or ask about security concerns!`;
                     break;
                     
                 case 'explain-code':
+                case 'explain_code':
                     if (this.selectedFile) {
                         this.sendQuickMessage(`Please explain how the code in ${this.selectedFile.name} works and what it does.`);
                     }
                     break;
                     
+                case 'optimize_performance':
+                    if (this.selectedFile) {
+                        this.sendQuickMessage(`Analyze ${this.selectedFile.name} and suggest specific performance optimizations. Show me the exact code changes to implement.`);
+                    }
+                    break;
+                    
+                case 'check_pep8':
+                    if (this.selectedFile) {
+                        this.sendQuickMessage(`Check ${this.selectedFile.name} for PEP8 compliance and suggest specific formatting improvements with exact code changes.`);
+                    }
+                    break;
+                    
                 case 'generate-tests':
+                case 'generate_unit_tests':
                     const testFiles = this.selectedTestFiles.length > 0 ? this.selectedTestFiles : [this.selectedFile?.path].filter(Boolean);
                     if (testFiles.length > 0) {
-                        this.sendQuickMessage(`Generate ${this.testConfig.type} tests for: ${testFiles.join(', ')}`);
+                        this.sendQuickMessage(`Generate ${this.testConfig.type} tests for: ${testFiles.join(', ')}. Please provide the complete test code that I can copy and use.`);
                     } else {
                         this.sendQuickMessage('Generate comprehensive test suites for the selected files.');
                     }
                     break;
                     
+                case 'generate_integration_tests':
+                    this.sendQuickMessage('Generate integration tests that test component interactions. Provide complete test code with setup instructions.');
+                    break;
+                    
                 case 'test-strategy':
-                    this.sendQuickMessage('Suggest a comprehensive testing strategy for this project including unit, integration, and e2e tests.');
+                case 'test_strategy':
+                    this.sendQuickMessage('Suggest a comprehensive testing strategy for this project including unit, integration, and e2e tests with specific frameworks and setup instructions.');
                     break;
                     
                 case 'scan-vulnerabilities':
-                    this.sendQuickMessage('Scan the selected files for security vulnerabilities and provide recommendations.');
+                case 'scan_vulnerabilities':
+                    this.sendQuickMessage('Scan the selected files for security vulnerabilities and provide specific remediation steps with code examples.');
                     break;
                     
                 case 'check-dependencies':
-                    this.sendQuickMessage('Analyze the project dependencies for security vulnerabilities and outdated packages.');
+                case 'check_dependencies':
+                    this.sendQuickMessage('Analyze the project dependencies for security vulnerabilities and outdated packages. Suggest specific updates and security improvements.');
+                    break;
+                    
+                case 'review_auth':
+                    this.sendQuickMessage('Review authentication and authorization patterns in the code. Identify security issues and provide secure code examples.');
+                    break;
+                    
+                // New actions for applying code changes
+                case 'apply_code_fix':
+                    if (action.code && this.monacoEditor) {
+                        this.applyCodeChanges(action.code, action.description || 'Applied AI suggestion');
+                    }
+                    break;
+                    
+                case 'apply_optimization':
+                    if (action.code && this.monacoEditor) {
+                        this.applyCodeChanges(action.code, 'Applied performance optimization');
+                    }
+                    break;
+                    
+                case 'apply_refactor':
+                    if (action.code && this.monacoEditor) {
+                        this.applyCodeChanges(action.code, 'Applied refactoring suggestion');
+                    }
                     break;
                     
                 default:
                     console.warn('Unknown action:', action.id);
+                    // Try to handle as a general message
+                    if (action.label) {
+                        this.sendQuickMessage(action.label);
+                    }
             }
+        },
+
+        // New method to apply code changes directly to Monaco editor
+        applyCodeChanges(newCode, description = 'Applied AI changes') {
+            if (!this.monacoEditor) {
+                console.error('Monaco editor not available');
+                return;
+            }
+
+            try {
+                console.log('Applying code changes:', description);
+                
+                // Get current content for comparison
+                const currentContent = this.monacoEditor.getValue();
+                
+                // Apply the new code
+                this.monacoEditor.setValue(newCode);
+                
+                // Mark as modified
+                this.hasChanges = true;
+                
+                // Show notification
+                this.showNotification?.('success', `✅ ${description}`);
+                
+                // Add to chat as confirmation
+                const confirmationMessage = {
+                    id: Date.now(),
+                    role: 'assistant',
+                    content: `**✅ Code Applied Successfully**\n\n${description}\n\nThe changes have been applied to your editor. You can review them and commit when ready.`,
+                    timestamp: new Date()
+                };
+                this.chatMessages.push(confirmationMessage);
+                
+                // Scroll chat to bottom
+                this.$nextTick(() => {
+                    const chatContainer = document.querySelector('.ai-chat-messages');
+                    if (chatContainer) {
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                    }
+                });
+                
+                // Focus editor to show changes
+                this.monacoEditor.focus();
+                
+            } catch (error) {
+                console.error('Error applying code changes:', error);
+                this.showNotification?.('error', `❌ Failed to apply changes: ${error.message}`);
+            }
+        },
+
+        // Enhanced method to handle different types of AI responses
+        handleAIResponse(response) {
+            // Check if response contains code to apply
+            if (response.code && response.apply_directly) {
+                this.applyCodeChanges(response.code, response.description);
+                return;
+            }
+            
+            // Check if response contains suggestions with code
+            if (response.suggestions) {
+                response.suggestions.forEach(suggestion => {
+                    if (suggestion.code && suggestion.auto_apply) {
+                        this.applyCodeChanges(suggestion.code, suggestion.description);
+                    }
+                });
+            }
+            
+            // Handle normal message display
+            const assistantMessage = {
+                id: Date.now(),
+                role: 'assistant',
+                content: response.content || response.response || 'No response received',
+                timestamp: new Date(),
+                actions: response.actions || []
+            };
+            
+            this.chatMessages.push(assistantMessage);
         },
 
         // Utility methods
