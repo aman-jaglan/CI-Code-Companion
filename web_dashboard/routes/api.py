@@ -1,9 +1,12 @@
 """
 CI Code Companion API Routes
 Provides endpoints for code analysis, metrics, and suggestions
+
+Enhanced with PromptLoader integration for Cursor-style prompting and Gemini 2.5 Pro optimization.
 """
 
 import os
+import sys
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +16,21 @@ from sqlalchemy.orm import sessionmaker
 import logging
 import json
 import random
+from typing import Dict, Any, List
+
+# Add SDK to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+# Import enhanced SDK components
+try:
+    from ci_code_companion_sdk.core.prompt_loader import PromptLoader
+    from ci_code_companion_sdk.core.config import SDKConfig
+    from ci_code_companion_sdk.agents.specialized.code.react_code_agent import ReactCodeAgent
+    from ci_code_companion_sdk.integrations.vertex_ai_client import VertexAIClient
+    SDK_AVAILABLE = True
+except ImportError as e:
+    current_app.logger.warning(f"SDK import failed: {e}")
+    SDK_AVAILABLE = False
 
 # Temporarily commented out old imports that are causing module errors
 # These will need to be updated to use the new SDK models
@@ -25,6 +43,9 @@ import random
 
 # Create blueprint
 api = Blueprint('api', __name__, url_prefix='/api/v2')
+
+# Note: AI system initialization is handled by ai_service.py
+# This file contains only pure API request handlers
 
 # Database setup
 def init_database():
@@ -427,4 +448,99 @@ def analyze_test_impact(repo_id):
             'coverage_impact': {},
             'risk_assessment': {}
         }
-    }) 
+    })
+
+@api.route('/ai/chat', methods=['POST'])
+def ai_chat():
+    """
+    Pure API handler - routes requests to AI service layer
+    
+    This endpoint only handles HTTP request/response and delegates to ai_service
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        message = data.get('message', '')
+        mode = data.get('mode', 'general')
+        model = data.get('model', 'gemini-2.5-pro')
+        context = data.get('context', {})
+        
+        if not message:
+            return jsonify({'error': 'Message is required'}), 400
+        
+        current_app.logger.info(f"🌐 API HANDLER: Received {mode} request, delegating to AI service")
+        
+        # Import and use AI service
+        try:
+            from ci_code_companion_sdk.services.ai_service import StreamlinedAIService
+            from ci_code_companion_sdk.core.config import SDKConfig
+            
+            # Initialize AI service
+            config = SDKConfig()
+            ai_service = StreamlinedAIService(config, current_app.logger)
+            
+            # Delegate to AI service based on mode
+            if mode == 'code':
+                result = asyncio.run(ai_service.handle_code_analysis(message, context, model))
+            elif mode == 'test':
+                result = asyncio.run(ai_service.handle_test_generation(message, context, model))
+            elif mode == 'security':
+                result = asyncio.run(ai_service.handle_security_analysis(message, context, model))
+            else:
+                result = asyncio.run(ai_service.handle_general_chat(message, context, model))
+            
+            current_app.logger.info(f"✅ API HANDLER: AI service completed, returning result")
+            return jsonify(result)
+            
+        except ImportError as e:
+            current_app.logger.error(f"❌ AI SERVICE IMPORT ERROR: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'AI service not available',
+                'message': 'Please check AI service configuration'
+            }), 503
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ API HANDLER ERROR: {str(e)}")
+        return jsonify({
+            'error': 'API request failed',
+            'details': str(e)
+        }), 500
+
+# Helper functions for chat handling
+
+# Utility functions for language detection and intent classification
+def detect_language(file_path):
+    """Detect programming language from file extension"""
+    if not file_path:
+        return 'unknown'
+    
+    ext = file_path.split('.')[-1].lower()
+    return {
+        'tsx': 'typescript',
+        'ts': 'typescript',
+        'jsx': 'javascript',
+        'js': 'javascript',
+        'py': 'python'
+    }.get(ext, 'unknown')
+
+def classify_user_intent(message):
+    """Classify user intent from message"""
+    message_lower = message.lower()
+    
+    if any(word in message_lower for word in ['analyze', 'review', 'check']):
+        return 'analysis'
+    elif any(word in message_lower for word in ['optimize', 'improve', 'performance']):
+        return 'optimization'
+    elif any(word in message_lower for word in ['fix', 'error', 'bug', 'issue']):
+        return 'debugging'
+    elif any(word in message_lower for word in ['refactor', 'clean', 'restructure']):
+        return 'refactoring'
+    elif any(word in message_lower for word in ['test', 'testing', 'spec']):
+        return 'testing'
+    else:
+        return 'general'
+
+# End of API routes 

@@ -1,58 +1,68 @@
 """
-CI Code Companion SDK
+CI Code Companion SDK - Streamlined Architecture
 
 A comprehensive software development kit for intelligent code analysis, review, and repository management.
 This SDK provides a unified interface for multi-technology code analysis, AI-powered insights,
-and repository browsing capabilities.
+and repository browsing capabilities with streamlined agent integration.
+
+STREAMLINED ARCHITECTURE:
+- Unified CICodeCompanionSDK interface (primary)
+- StreamlinedAIService for direct AI operations with agent integration
+- Specialized agents for React, Python, Node.js development
+- Single Gemini model focus (no fallbacks)
+- Reduced redundancy and optimized performance
 
 Key Features:
-- Multi-technology AI agents (React, Python, Node.js, Database, DevOps, Mobile)
-- Real-time code analysis and review
-- Intelligent test generation
-- Code optimization suggestions
+- Multi-technology AI agents (React, Python, Node.js) with chat support
+- Real-time code analysis and review using specialized agents
+- Intelligent test generation with agent expertise
+- Code optimization suggestions from domain experts
+- Direct chat with specialized agents for context-aware assistance
 - Repository browsing with Monaco editor integration
 - GitLab integration for seamless workflow
 - Production-ready error handling and logging
 
-Example Usage:
-    from ci_code_companion_sdk import CICodeCompanionEngine
+RECOMMENDED USAGE:
+    from ci_code_companion_sdk import CICodeCompanionSDK, SDKConfig
     
-    # Initialize the SDK
-    engine = CICodeCompanionEngine(config={
-        'gitlab_url': 'https://gitlab.com',
-        'gitlab_token': 'your-token-here',
-        'log_level': 'INFO'
+    # Initialize the streamlined SDK
+    sdk = CICodeCompanionSDK(config={
+        'ai_provider': 'vertex_ai',
+        'project_id': 'your-gcp-project',
+        'region': 'us-central1'
     })
     
-    # Analyze a file
-    result = await engine.analyze_file('path/to/file.py', file_content)
+    # Analyze a React file (uses ReactCodeAgent)
+    result = await sdk.analyze_file('component.jsx', file_content)
     
-    # Generate tests
-    test_result = await engine.generate_tests('path/to/file.py', file_content)
+    # Chat with Python expert (uses PythonCodeAgent)
+    response = await sdk.chat("How do I optimize this loop?", 
+                             file_path='script.py', content=python_code)
     
-    # Optimize code
-    optimization = await engine.optimize_code('path/to/file.py', file_content)
-    
-    # Chat with AI agents
-    response = await engine.chat_with_agent("How can I improve this function?", 
-                                           file_path='path/to/file.py', 
-                                           content=file_content)
+    # Generate tests using appropriate agent
+    tests = await sdk.generate_tests('utils.py', file_content)
 
-Architecture:
-- Core Engine: Orchestrates all operations and provides unified interface
-- Agent System: Specialized AI agents for different technologies and frameworks
-- Service Layer: File operations, Git integration, and analysis services
-- Models: Structured data models for results and metadata
-- Configuration: Comprehensive configuration management
+STREAMLINED FLOW:
+    Chatbot → CICodeCompanionSDK → StreamlinedAIService → Specialized Agents → VertexAI → Gemini Model
+                                                      ↳ Direct AI (for unsupported file types)
+
+Architecture Components:
+- CICodeCompanionSDK: Primary user interface (replaces CICodeCompanionEngine)
+- StreamlinedAIService: Intelligent routing between agents and direct AI
+- Specialized Agents: Expert knowledge for specific technologies with chat support
+- VertexAI Client: Direct connection to configured Gemini model (no fallbacks)
+- Configuration: Simplified configuration management
 - Exception System: Hierarchical exception handling with context
 
-The SDK is designed for production use with comprehensive error handling,
-logging, monitoring, and performance optimization.
+The SDK automatically routes requests to appropriate specialized agents based on file type and content,
+falling back to direct AI processing for unsupported file types. All agents support chat interactions
+for context-aware assistance.
 """
 
 import logging
 import sys
 import platform
+from typing import Optional, Union, Dict, Any, List
 
 # Version information
 __version__ = "1.0.0"
@@ -61,7 +71,7 @@ __email__ = "support@codecompanion.dev"
 __license__ = "MIT"
 
 # Core exports
-from .core.engine import CICodeCompanionEngine
+from .core.engine import CICodeCompanionEngine  # DEPRECATED: Use CICodeCompanionSDK instead
 from .core.config import SDKConfig, load_config_from_file, merge_configs
 from .core.exceptions import (
     CICodeCompanionError,
@@ -93,14 +103,15 @@ from .models.analysis_model import (
 )
 from .models.file_model import FileInfo, ProjectInfo
 
-# Agent exports
+# Agent exports (streamlined)
 from .agents.base_agent import BaseAgent, AgentCapability
-from .agents.agent_manager import AgentManager
+from .agents.agent_manager import AgentManager  # Legacy - use StreamlinedAIService
 
-# Service exports
+# Service exports (streamlined)
 from .services.file_service import FileService
 from .services.git_service import GitService
-from .services.analysis_service import AnalysisService
+from .services.analysis_service import AnalysisService  # Legacy
+from .services.ai_service import StreamlinedAIService  # New streamlined service
 
 # Integration exports
 from .integrations.gitlab_client import GitLabClient
@@ -124,7 +135,8 @@ __all__ = [
     '__license__',
     
     # Core components
-    'CICodeCompanionEngine',
+    'CICodeCompanionEngine',  # DEPRECATED
+    'CICodeCompanionSDK',     # Primary interface
     'SDKConfig',
     'load_config_from_file',
     'merge_configs',
@@ -157,15 +169,16 @@ __all__ = [
     'FileInfo',
     'ProjectInfo',
     
-    # Agents
+    # Agents (streamlined)
     'BaseAgent',
     'AgentCapability',
-    'AgentManager',
+    'AgentManager',  # Legacy
     
-    # Services
+    # Services (streamlined)
     'FileService',
     'GitService',
-    'AnalysisService',
+    'AnalysisService',      # Legacy
+    'StreamlinedAIService', # Primary AI service
     
     # Integrations
     'GitLabClient',
@@ -358,4 +371,95 @@ if _default_logger.level <= logging.DEBUG:
     _default_logger.debug("  ✓ Intelligent test generation")
     _default_logger.debug("  ✓ Code optimization suggestions")
     _default_logger.debug("  ✓ GitLab integration")
-    _default_logger.debug("  ✓ Production-ready error handling") 
+    _default_logger.debug("  ✓ Production-ready error handling")
+
+class CICodeCompanionSDK:
+    """
+    Simplified SDK interface that provides direct access to AI capabilities.
+    Streamlined for better performance and clearer model usage.
+    """
+    
+    def __init__(self, config: Optional[Union[Dict[str, Any], SDKConfig]] = None):
+        """
+        Initialize the CI Code Companion SDK.
+        
+        Args:
+            config: Configuration dictionary or SDKConfig instance
+        """
+        if isinstance(config, SDKConfig):
+            self.config = config
+        else:
+            self.config = SDKConfig(config or {})
+        
+        self.logger = logging.getLogger('ci_code_companion_sdk')
+        
+        # Initialize streamlined AI service directly
+        try:
+            from .services.ai_service import StreamlinedAIService
+            self.ai_service = StreamlinedAIService(self.config, self.logger)
+            self.logger.info(f"SDK initialized with model: {self.ai_service.vertex_client.model_name}")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize SDK: {e}")
+            self.ai_service = None
+            raise
+        
+    async def analyze_file(self, file_path: str, content: str, **kwargs) -> AnalysisResult:
+        """Analyze a file using AI."""
+        self.logger.info(f"📊 SDK METHOD: analyze_file() called for {file_path}")
+        
+        if not self.ai_service:
+            self.logger.error("❌ SDK ERROR: AI service not initialized")
+            raise ConfigurationError("AI service not initialized")
+        
+        analysis_type = kwargs.get('analysis_type', 'comprehensive')
+        self.logger.info(f"🔄 SDK ROUTING: Delegating to StreamlinedAIService.analyze_code()")
+        
+        return await self.ai_service.analyze_code(file_path, content, analysis_type)
+    
+    async def generate_tests(self, file_path: str, content: str, **kwargs) -> TestGenerationResult:
+        """Generate tests for a file."""
+        self.logger.info(f"🧪 SDK METHOD: generate_tests() called for {file_path}")
+        
+        if not self.ai_service:
+            self.logger.error("❌ SDK ERROR: AI service not initialized")
+            raise ConfigurationError("AI service not initialized")
+        
+        test_type = kwargs.get('test_type', 'unit')
+        self.logger.info(f"🔄 SDK ROUTING: Delegating to StreamlinedAIService.generate_tests()")
+        
+        return await self.ai_service.generate_tests(file_path, content, test_type)
+    
+    async def optimize_code(self, file_path: str, content: str, **kwargs) -> OptimizationResult:
+        """Optimize code in a file."""
+        self.logger.info(f"⚡ SDK METHOD: optimize_code() called for {file_path}")
+        
+        if not self.ai_service:
+            self.logger.error("❌ SDK ERROR: AI service not initialized")
+            raise ConfigurationError("AI service not initialized")
+        
+        optimization_type = kwargs.get('optimization_type', 'performance')
+        self.logger.info(f"🔄 SDK ROUTING: Delegating to StreamlinedAIService.optimize_code()")
+        
+        return await self.ai_service.optimize_code(file_path, content, optimization_type)
+    
+    async def chat(self, message: str, file_path: Optional[str] = None, content: Optional[str] = None, conversation_history: Optional[List[Dict[str, str]]] = None) -> str:
+        """Chat with AI."""
+        self.logger.info(f"💬 SDK METHOD: chat() called with message: '{message[:50]}{'...' if len(message) > 50 else ''}'")
+        
+        if not self.ai_service:
+            self.logger.error("❌ SDK ERROR: AI service not initialized")
+            raise ConfigurationError("AI service not initialized")
+        
+        self.logger.info(f"🔄 SDK ROUTING: Delegating to StreamlinedAIService.chat()")
+        
+        return await self.ai_service.chat(message, file_path, content, conversation_history)
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check SDK health status."""
+        if not self.ai_service:
+            return {
+                "status": "unhealthy",
+                "error": "AI service not initialized"
+            }
+        
+        return await self.ai_service.health_check() 

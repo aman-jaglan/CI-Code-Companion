@@ -559,6 +559,33 @@ class SDKConfig:
                 config_dict[key] = '*' * 8
         
         return config_dict
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value with fallback to default.
+        Provides dictionary-like access to configuration values.
+        
+        Args:
+            key: Configuration key to retrieve
+            default: Default value if key is not found
+            
+        Returns:
+            Configuration value or default
+        """
+        if hasattr(self, key):
+            return getattr(self, key)
+        
+        # Handle special keys that don't map directly to attributes
+        special_mappings = {
+            'prompts_dir': 'agent_prompts',  # Default prompts directory
+            'ai_provider': 'vertex_ai',      # Default AI provider
+            'project_id': os.getenv('GCP_PROJECT_ID', 'default-project')
+        }
+        
+        if key in special_mappings:
+            return special_mappings[key]
+        
+        return default
 
 
 def _parse_list(value: str, separator: str = ',') -> List[str]:
